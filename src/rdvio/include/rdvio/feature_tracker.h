@@ -2,6 +2,7 @@
 
 #include <rdvio/types.h>
 #include <rdvio/estimation/state.h>
+#include <optional>
 
 namespace rdvio {
 class Frontend;

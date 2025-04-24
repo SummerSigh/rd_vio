@@ -17,7 +17,7 @@ struct Solver::SolverDetails {
     }
     std::unique_ptr<ceres::Problem> problem;
     std::unique_ptr<ceres::LossFunction> cauchy_loss;
-    std::unique_ptr<ceres::LocalParameterization> quaternion_parameterization;
+    std::unique_ptr<ceres::Manifold> quaternion_parameterization;
     std::vector<std::unique_ptr<ReprojectionErrorFactor>> managed_rpefactors;
     std::vector<std::unique_ptr<ReprojectionPriorFactor>> managed_rppfactors;
     std::vector<std::unique_ptr<RotationPriorFactor>> managed_ropfactors;
@@ -30,8 +30,9 @@ Solver::Solver() : details(std::make_unique<SolverDetails>()) {
     ceres::Problem::Options problem_options;
     problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
     problem_options.loss_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
-    problem_options.local_parameterization_ownership =
-        ceres::DO_NOT_TAKE_OWNERSHIP;
+    problem_options.manifold_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
+    // Remove or comment out the line below as it's no longer in the API
+    // problem_options.local_parameterization_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
     details->problem = std::make_unique<ceres::Problem>(problem_options);
     details->cauchy_loss = std::make_unique<ceres::CauchyLoss>(
         1.0); // TODO(jinyu): make configurable
@@ -39,7 +40,10 @@ Solver::Solver() : details(std::make_unique<SolverDetails>()) {
         std::make_unique<QuaternionParameterization>();
 }
 
-Solver::~Solver() = default;
+Solver::~Solver() {
+    details->problem.reset();
+    details->quaternion_parameterization.reset();
+}
 
 void Solver::init(Config *config) { SolverDetails::config() = config; }
 

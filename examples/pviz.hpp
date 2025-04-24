@@ -5,10 +5,12 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <iostream>
+#include <thread>
+#include <chrono>
 
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>
-#include <pangolin/pangolin.h>
 
 namespace pviz{
 
@@ -85,10 +87,10 @@ public:
     float uy = -1.0;
     float uz = 0.0;
     ///// bounds
-    pangolin::Attach bbottom = 0.0;
-    pangolin::Attach btop = 1.0;
-    pangolin::Attach bleft = 0.0;
-    pangolin::Attach bright = 1.0;
+    float bbottom = 0.0;
+    float btop = 1.0;
+    float bleft = 0.0;
+    float bright = 1.0;
     ///// background
     Color bg = Color::RGB(255, 255, 255);
     Color camera = Color::RGB(0, 0, 255);
@@ -117,61 +119,18 @@ public:
         exit();
     }
 
-    // main loop
+    // main loop - simplified version without visualization
     void run() {
-        // Window Create 
-        pangolin::CreateWindowAndBind(title_, SE.width, SE.height);
-        // Issue specific OpenGl we might need
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        // 3D Mouse handler requires depth testing to be enabled
-        glEnable(GL_DEPTH_TEST);
-        // Define Camera Render Object (for view / scene browsing)
-        s_cam = pangolin::OpenGlRenderState(
-            pangolin::ProjectionMatrix(
-                SE.width, SE.height,
-                SE.focal, SE.focal,
-                SE.width / 2, SE.height / 2,
-                SE.near, SE.far),
-            pangolin::ModelViewLookAt(
-                SE.ex, SE.ey, SE.ez,
-                SE.lx, SE.ly, SE.lz,
-                SE.ux, SE.uy, SE.uz)
-        );
-        // Add named OpenGL viewport to window and provide 3D Handler
-        pangolin::View& d_cam = pangolin::CreateDisplay()
-            .SetBounds(SE.bbottom, SE.btop, SE.bleft, SE.bright, 
-                -1 * (float)SE.width / (float)SE.height)
-            .SetHandler(new pangolin::Handler3D(s_cam));
-        // main camear view Twc
-        viewport_Twc_.SetIdentity();
-        // main loop
+        std::cout << "Tracking started. Position values will be printed to console." << std::endl;
+        std::cout << "Format: [x, y, z]" << std::endl;
+        
+        // Simple loop that just waits for exit signal
         while(!exit_) {
-            // Clear GL Buffer
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            if(SE.follow) {
-                std::lock_guard<std::mutex> lock(mutex_cam_);
-                s_cam.Follow(viewport_Twc_);
-            }
-            d_cam.Activate(s_cam);
-            // back ground
-            auto bg = SE.bg.float_;
-            glClearColor(bg.r, bg.g, bg.b, 1.0);
-            // draw
-            draw_viewpose();
-            draw_local_point_cloud();
-            draw_keyframes();
-            draw_global_point_cloud();
-            draw_trajectory();
-            // Finish
-            pangolin::FinishFrame();
-            // extra topics
-            draw_topics();
+            // Sleep to avoid high CPU usage
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-            
-        pangolin::DestroyWindow(title_);
-        cv::destroyAllWindows();
-
+        
+        std::cout << "Tracking stopped." << std::endl;
     }
 
     // exit loop
@@ -179,207 +138,64 @@ public:
         exit_ = true;
     }
 
-    // trajectory (Twc)
+    // trajectory (Twc) - now just prints position values
     void publish_trajectory(const Eigen::Matrix4d& T) {
-        trajectory_.push_back(T);
-        Eigen::Matrix4d Twc = Eigen::Matrix4d::Identity();
-        Twc.block<3, 1>(0, 3) = T.block<3, 1>(0, 3);
-        std::lock_guard<std::mutex> lock(mutex_cam_);
-        viewport_Twc_ = pangolin::OpenGlMatrix(Twc);
+        // Extract position (translation) from transformation matrix
+        Eigen::Vector3d position = T.block<3, 1>(0, 3);
+        
+        // Print position values to console
+        std::cout << "Position: [" << position(0) << ", " << position(1) << ", " << position(2) << "]" << std::endl;
     }
     void publish_trajectory(const Eigen::Matrix3d& R, const Eigen::Vector3d& t) {
-        Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-        T.block<3, 3>(0, 0) = R;
-        T.block<3, 1>(0, 3) = t;
-        publish_trajectory(T);
+        // Print position values directly from translation vector
+        std::cout << "Position: [" << t(0) << ", " << t(1) << ", " << t(2) << "]" << std::endl;
     }
 
-    // keyframe
+    // Empty placeholder methods for compatibility
+    // These methods no longer do anything since we've removed visualization
+    
+    // keyframe - no-op methods
     void publish_keyframe(const size_t id, const Eigen::Matrix4d& Twc) {
-        keyframes_[id] = Twc;
+        // No operation needed
     }
     void remove_keyframe(const size_t id) {
-        if(keyframes_.count(id) > 0) keyframes_.erase(id);
+        // No operation needed
     }
     void remove_keyframes() {
-        keyframes_.clear();
+        // No operation needed
     }
 
-    // global map
+    // global map - no-op methods
     void publish_global_point_cloud(const size_t id, const Eigen::Vector3d& point) {
-        global_point_cloud_[id] = point;
+        // No operation needed
     }
     void remove_global_point_cloud(const size_t id) {
-        if(global_point_cloud_.count(id) > 0) global_point_cloud_.erase(id);
+        // No operation needed
     }
     void remove_global_point_clouds() {
-        global_point_cloud_.clear();
+        // No operation needed
     }
 
-    // local map
+    // local map - no-op methods
     void publish_local_point_cloud(const std::vector<Eigen::Vector3d>& points, const bool copy = false) {
-        if(points.size() == 0) return;
-        std::lock_guard<std::mutex> lock(mutex_lmap_);
-        if(copy) {
-            local_point_cloud_.clear();
-            local_point_cloud_.reserve(points.size());
-            std::copy(points.begin(), points.end(), local_point_cloud_.begin());
-        } else {
-            local_point_cloud_ = std::move(points);
-        }
+        // No operation needed
     }
     void remove_local_point_cloud() {
-        std::lock_guard<std::mutex> lock(mutex_lmap_);
-        local_point_cloud_.clear();
+        // No operation needed
     }
 
-    // extra topic
+    // extra topic - no-op method
     void publish_topic(const std::string& topic, const cv::Mat& img) {
-        std::lock_guard<std::mutex> lock(mutex_topic_);
-        topics_[topic] = img.clone();
+        // No operation needed
     }
 
 private:
-    ///// draw functions
-    void draw_viewpose() {
-        draw_camera_axes(Eigen::Matrix4d::Identity());
-        if(trajectory_.size() == 0) return;
-        Eigen::Matrix4d Twi = trajectory_.back();
-        draw_camera(Twi, SE.camera);
-        draw_camera_axes(Twi);
-    }
-    void draw_camera(const Eigen::Matrix4d& Twc, const Color& c) {
-        pangolin::OpenGlMatrix Twc_gl(Twc);
-        draw_camera(Twc_gl, c);
-    }
-    void draw_camera(const pangolin::OpenGlMatrix& Twc, const Color& c) {
-        const float w = 0.08; // camera size;
-        const float h = w * 0.75;
-        const float z = w * 0.6;
+    // No drawing functions needed anymore as we're just printing position values
 
-        glPushMatrix();
-        glMultMatrixd(Twc.m);
-        glLineWidth(3); // camera line width
-
-        glColor3f(c.float_.r, c.float_.g, c.float_.b);
-        
-        glBegin(GL_LINES);
-        // camera body
-        glVertex3f(0,0,0); glVertex3f(w,h,z);
-        glVertex3f(0,0,0); glVertex3f(w,-h,z);
-        glVertex3f(0,0,0); glVertex3f(-w,-h,z);
-        glVertex3f(0,0,0); glVertex3f(-w,h,z);
-        // border
-        glVertex3f(w,h,z); glVertex3f(w,-h,z);
-        glVertex3f(-w,h,z); glVertex3f(-w,-h,z);
-        glVertex3f(-w,h,z); glVertex3f(w,h,z);
-        glVertex3f(-w,-h,z); glVertex3f(w,-h,z);
-        glEnd();
-
-        glPopMatrix();
-    }
-
-    void draw_camera_axes(const pangolin::OpenGlMatrix& Twc) {
-        const float w = SE.axes_size; // camera axes size;
-
-        glPushMatrix();
-        glMultMatrixd(Twc.m);
-        glLineWidth(10); // camera line width
-
-        glBegin(GL_LINES);
-        // x
-        glColor3f(1, 0, 0);
-        glVertex3f(0,0,0); glVertex3f(w,0,0);
-        // y
-        glColor3f(0, 1, 0);
-        glVertex3f(0,0,0); glVertex3f(0,w,0);
-        // z
-        glColor3f(0, 0, 1);
-        glVertex3f(0,0,0); glVertex3f(0,0,w);
-        glEnd();
-
-        glPopMatrix();
-    }
-    void draw_camera_axes(const Eigen::Matrix4d& Twc) {
-        pangolin::OpenGlMatrix Twc_gl(Twc);
-        draw_camera_axes(Twc_gl);
-    }
-
-    void draw_trajectory() {
-        glLineWidth(SE.traj_linewidth);
-        glBegin(GL_LINE_STRIP);
-        auto color = SE.traj.float_;
-        for(const auto& m : trajectory_) {
-            glColor3f(color.r, color.g, color.b);
-            glVertex3d(m(0, 3), m(1, 3), m(2, 3));
-        }
-        glEnd();
-    }
-
-    void draw_keyframes() {
-        for(const auto& kf : keyframes_) {
-            draw_camera(kf.second, SE.kf);
-        }
-    }
-
-    void draw_global_point_cloud() {
-        glPointSize(SE.gmap_size);
-        glBegin(GL_POINTS);
-        auto color = SE.gmap.float_;
-        for(const auto& p : global_point_cloud_) {
-            glColor3f(color.r, color.g, color.b);
-            glVertex3d(p.second(0), p.second(1), p.second(2));
-        }
-        glEnd();
-    }
-
-    void draw_local_point_cloud() {
-        glPointSize(SE.lmap_size);
-        glBegin(GL_POINTS);
-        auto color = SE.lmap.float_;
-        {
-            std::lock_guard<std::mutex> lock(mutex_lmap_);
-            for(const auto& p : local_point_cloud_) {
-                glColor3f(color.r, color.g, color.b);
-                glVertex3d(p(0), p(1), p(2));
-            }
-        }
-        glEnd();
-    }
-
-    void draw_topics() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_topic_);
-            for(const auto& topic : topics_) {
-                cv::Mat img = topic.second;
-                if(img.empty()) continue;
-                cv::imshow(topic.first, img);
-            } 
-        }
-        cv::waitKey(SE.topic_wait_ms);
-    }
-
-    ///// trajectory
-    pangolin::OpenGlMatrix viewport_Twc_;
-    std::vector<Eigen::Matrix4d> trajectory_;
-    ///// 3d map
-    std::vector<Eigen::Vector3d> local_point_cloud_;
-    std::unordered_map<size_t, Eigen::Vector3d> global_point_cloud_;
-    ///// keyframe
-    std::unordered_map<size_t, Eigen::Matrix4d> keyframes_;
-    ///// extra topic
-    std::unordered_map<std::string, cv::Mat> topics_;
-
-    ///// pangolin settings
+    ///// simplified member variables
     const Settings SE;
     const std::string title_;   // title
     std::atomic<bool> exit_ = false;    // exit signal
-    pangolin::OpenGlRenderState s_cam;
-
-    ///// mutex
-    std::mutex mutex_cam_;
-    std::mutex mutex_lmap_;
-    std::mutex mutex_topic_;
 
 }; // class Viewer
 

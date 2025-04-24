@@ -6,6 +6,7 @@
 #include <rdvio/map/map.h>
 #include <rdvio/util/identifiable.h>
 #include <rdvio/util/tag.h>
+#include <optional>
 
 namespace rdvio {
 
