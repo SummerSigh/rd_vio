@@ -3,6 +3,7 @@
 #include <rdvio/rdvio.hpp>
 #include "dataset.hpp"
 #include "pviz.hpp"
+#include "slime.cpp"
 
 
 int main(int argc, char** argv) {
@@ -25,6 +26,23 @@ int main(int argc, char** argv) {
     auto viewer = pviz::Viewer("euroc", viewer_setting);
 
     std::thread viewer_thread(&pviz::Viewer::run, &viewer);
+
+    // Initialize SlimeVR connection with retries
+    bool slime_connected = false;
+    while(!slime_connected) {
+        std::cout << "Searching for SlimeVR server..." << std::endl;
+        slime_connected = slimeDiscoverServer(0);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    // Start heartbeat thread
+    std::thread slime_heartbeat_thread([]() {
+        while(true) {
+            slimeSendHeartbeat();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
     std::shared_ptr<dataset::dataclip_t> data;
 
     while((data = euroc.next())) {
@@ -61,7 +79,17 @@ int main(int argc, char** argv) {
         }
 
         if(vio.state() == 1) {
-            viewer.publish_trajectory(vio.transform_world_cam());
+            
+            // Extract and adjust rotation for SlimeVR coordinate system
+            Eigen::Matrix4d T = vio.transform_world_cam();
+            Eigen::Matrix3d R = T.block<3,3>(0,0);
+            Eigen::Quaterniond q(R);
+            
+            std::cout << "Rotation Quaternion: [" << q.x() << ", " << q.z() << ", " << -q.y() << ", " << q.w() << "]\n";
+
+            // Convert to SlimeVR's coordinate system (adjust if needed)
+            slimeSendRotationQuat(q.x(), q.z(), -q.y(), q.w());
+            
             viewer.publish_local_point_cloud(vio.local_map());
         }
     }
