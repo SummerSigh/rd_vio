@@ -44,6 +44,14 @@ int main(int argc, char** argv) {
     });
 
     std::shared_ptr<dataset::dataclip_t> data;
+    
+    // Variables to track processing frequency
+    auto last_motion_timestamp = std::chrono::high_resolution_clock::now();
+    auto last_visual_timestamp = std::chrono::high_resolution_clock::now();
+    double motion_total_hz = 0.0;
+    double visual_total_hz = 0.0;
+    int motion_count = 0;
+    int visual_count = 0;
 
     while((data = euroc.next())) {
 
@@ -57,8 +65,30 @@ int main(int argc, char** argv) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
             if(elapsed > 0)
                 std::cout << "[rdvio] motion tracking takes " << elapsed << "ms" << std::endl;
+            
+            // Calculate and display motion tracking frequency
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double delta_sec = std::chrono::duration<double>(current_time - last_motion_timestamp).count();
+            if (delta_sec > 0) {
+                double hz = 1.0 / delta_sec;
+                motion_total_hz += hz;
+                motion_count++;
+                std::cout << "[rdvio] motion tracking rate: " << hz << " Hz (avg: " << (motion_total_hz/motion_count) << " Hz)" << std::endl;
+                last_motion_timestamp = current_time;
+            }
 #else
-            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            // Update timestamp for frequency calculation in multi-threading mode
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double delta_sec = std::chrono::duration<double>(current_time - last_motion_timestamp).count();
+            if (delta_sec > 0) {
+                double hz = 1.0 / delta_sec;
+                motion_total_hz += hz;
+                motion_count++;
+                std::cout << "[rdvio] motion tracking rate: " << hz << " Hz (avg: " << (motion_total_hz/motion_count) << " Hz)" << std::endl;
+                last_motion_timestamp = current_time;
+            }
+            // Reduced sleep time for faster motion processing
+           // std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #endif            
         }
 
@@ -73,8 +103,30 @@ int main(int argc, char** argv) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
             if(elapsed > 0)
                 std::cout << "[rdvio] visual tracking takes " << elapsed << "ms" << std::endl;
+            
+            // Calculate and display visual tracking frequency
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double delta_sec = std::chrono::duration<double>(current_time - last_visual_timestamp).count();
+            if (delta_sec > 0) {
+                double hz = 1.0 / delta_sec;
+                visual_total_hz += hz;
+                visual_count++;
+                std::cout << "[rdvio] visual tracking rate: " << hz << " Hz (avg: " << (visual_total_hz/visual_count) << " Hz)" << std::endl;
+                last_visual_timestamp = current_time;
+            }
 #else
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            // Update timestamp for frequency calculation in multi-threading mode
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double delta_sec = std::chrono::duration<double>(current_time - last_visual_timestamp).count();
+            if (delta_sec > 0) {
+                double hz = 1.0 / delta_sec;
+                visual_total_hz += hz;
+                visual_count++;
+                std::cout << "[rdvio] visual tracking rate: " << hz << " Hz (avg: " << (visual_total_hz/visual_count) << " Hz)" << std::endl;
+                last_visual_timestamp = current_time;
+            }
+            // Reduced sleep time for faster visual processing
+           // std::this_thread::sleep_for(std::chrono::milliseconds(10));
 #endif            
         }
 

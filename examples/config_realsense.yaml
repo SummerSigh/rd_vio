@@ -1,0 +1,44 @@
+# RDVIO Configuration for Intel RealSense Camera
+
+# System settings
+system:
+  mode: 0                 # 0: monocular-inertial mode
+  max_features: 200       # Maximum number of features to track
+  min_features: 50        # Minimum number of features to trigger new detection
+  max_depth: 5.0          # Maximum depth for valid 3D points (meters)
+  min_depth: 0.1          # Minimum depth for valid 3D points (meters)
+  max_iteration: 10       # Maximum iterations for optimization
+  keyframe_rotation: 10.0  # Rotation threshold for new keyframe (degrees)
+  keyframe_translation: 0.1 # Translation threshold for new keyframe (meters)
+  gravity_constant: 9.81  # Gravity constant (m/s^2)
+
+# Feature detection and tracking
+feature:
+  cell_size: 20           # Grid cell size for feature detection
+  pyramid_levels: 3       # Number of pyramid levels for KLT tracking
+  fast_threshold: 20      # FAST corner detector threshold
+  min_distance: 10        # Minimum distance between features
+  max_iterations: 30      # Maximum iterations for KLT tracking
+  epsilon: 0.01           # Convergence criterion for KLT tracking
+  window_size: 21         # Window size for KLT tracking
+
+# IMU processing
+imu:
+  acc_noise: 0.05         # Accelerometer noise density (m/s^2/sqrt(Hz))
+  gyro_noise: 0.005       # Gyroscope noise density (rad/s/sqrt(Hz))
+  acc_random_walk: 0.005  # Accelerometer random walk (m/s^3/sqrt(Hz))
+  gyro_random_walk: 0.0005 # Gyroscope random walk (rad/s^2/sqrt(Hz))
+  update_rate: 200        # IMU update rate (Hz)
+  gravity_init_window: 1.0 # Window size for gravity initialization (seconds)
+
+# Initialization
+init:
+  min_translation: 0.1    # Minimum translation for initialization (meters)
+  min_parallax: 10.0      # Minimum parallax for initialization (degrees)
+  min_triangulation: 20   # Minimum number of triangulated points for initialization
+  min_tracked: 30         # Minimum number of tracked features for initialization
+
+# Visualization
+visualization:
+  show_tracks: true       # Show feature tracks
+  show_points: true       # Show 3D points
