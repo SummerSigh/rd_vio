@@ -152,9 +152,8 @@ generate_nullspace_basis(const std::array<vector<2>, 5> &points1,
         }
     }
     
-    // Use more efficient SVD computation
-    // Only compute the parts we need (right singular vectors)
-    Eigen::BDCSVD<matrix<5, 9>> svd(A, Eigen::ComputeThinV);
+    // Use JacobiSVD instead of BDCSVD for fixed-size matrices
+    Eigen::JacobiSVD<matrix<5, 9>> svd(A, Eigen::ComputeFullV);
     return svd.matrixV().block<9, 4>(0, 5);
 }
 
