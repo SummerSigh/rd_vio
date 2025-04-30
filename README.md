@@ -84,7 +84,14 @@ Notes:
 - This example uses the infrared camera stream instead of RGB for better performance in SLAM
 - IMU data (gyroscope and accelerometer) is fused with visual tracking for robust odometry
 - The calibration tool automatically extracts intrinsics and extrinsics from the device
-- If calibration looks incorrect, try placing the camera on a stable surface and rerunning the calibration
+- **Firmware version:** For best results, ensure your camera has firmware version 5.13.0.0 or newer
+
+Troubleshooting:
+- If you get "Couldn't resolve requests", make sure your camera supports the requested streams (try plugging/unplugging the device)
+- If calibration is failing, try running with administrator privileges or checking USB connection
+- For stream configuration issues, the tool will try alternative settings automatically
+- If IMU calibration seems incorrect, try placing the camera on a stable surface and rerunning the calibration
+- You can check camera details with `rs-enumerate-devices` command (if RealSense SDK is installed)
 
 #### preview
 ![preview](preview.png)  

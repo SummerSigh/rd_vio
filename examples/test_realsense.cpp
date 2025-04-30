@@ -33,12 +33,41 @@ int main(int argc, char** argv) {
     rs2::pipeline pipe;
     rs2::config cfg;
 
-    // Enable infrared stream for SLAM (not depth or color)
-    cfg.enable_stream(RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_Y8, 30);
+    // Print available sensors on the device
+    std::cout << "\nAvailable sensors on this device:" << std::endl;
+    for (auto& sensor : device.query_sensors()) {
+        std::cout << "  - " << sensor.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
+    }
     
-    // Enable gyro and accelerometer
-    cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 250);
-    cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 400);
+    // Try flexible stream configuration (works for more devices)
+    try {
+        // Enable infrared stream for SLAM (not depth or color)
+        std::cout << "  - Enabling Left IR Stream..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_INFRARED, 1);
+        
+        // Enable gyro and accelerometer
+        std::cout << "  - Enabling Accelerometer..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_ACCEL);
+        
+        std::cout << "  - Enabling Gyroscope..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_GYRO);
+    } catch (const rs2::error& e) {
+        std::cerr << "\nError configuring streams: " << e.what() << std::endl;
+        std::cerr << "Trying fallback configuration..." << std::endl;
+        
+        // Clear configuration
+        cfg = rs2::config();
+        
+        // Use specific settings
+        std::cout << "  - Enabling Left IR Stream (640x480 @ 30fps)..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_Y8, 30);
+        
+        std::cout << "  - Enabling Accelerometer (200Hz)..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 200);
+        
+        std::cout << "  - Enabling Gyroscope (200Hz)..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 200);
+    }
 
     // Start the pipeline
     std::cout << "Starting RealSense pipeline..." << std::endl;
