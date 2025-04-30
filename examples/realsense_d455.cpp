@@ -422,9 +422,15 @@ int main(int argc, char** argv) {
                 auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
                 auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
                 
-                // Process calibration
-                processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                                       gyro_stream, accel_stream, output_yaml);
+                // Process calibration - only use right camera if available
+                if (right_available) {
+                    processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
+                                          gyro_stream, accel_stream, output_yaml);
+                } else {
+                    // Use left camera for right camera if right is not available
+                    processCameraCalibration(device, profile, ir_stream_left, ir_stream_left, 
+                                          gyro_stream, accel_stream, output_yaml);
+                }
                 
                 // Stop the pipeline
                 pipe.stop();
