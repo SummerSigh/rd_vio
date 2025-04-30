@@ -72,12 +72,6 @@ cd build
 cd build
 ./examples/test_realsense ../configs/realsense_d455_sensor.yaml ../configs/setting.yaml
 ```
-
-#### test with Intel RealSense D455 (New Example)
-```sh
-cd build
-./examples/realsense_d455 ../configs/realsense_d455_sensor.yaml ../configs/setting.yaml
-```
 Note: You need to have the RealSense D455 camera connected to your computer for this example to work.
 
 #### preview
