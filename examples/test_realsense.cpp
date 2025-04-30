@@ -9,6 +9,7 @@
 int main(int argc, char** argv) {
     if(argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <calib_file> <config_file>" << std::endl;
+        std::cerr << "  - Generate calibration file with: ./realsense_d455 <output_yaml>" << std::endl;
         return 1;
     }
 
@@ -26,23 +27,25 @@ int main(int argc, char** argv) {
     std::cout << "Found " << devices.size() << " RealSense device(s)" << std::endl;
     rs2::device device = devices[0];
     std::cout << "Using device: " << device.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
+    std::cout << "Serial Number: " << device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
 
     // Configure the pipeline
     rs2::pipeline pipe;
     rs2::config cfg;
 
-    // Enable color and depth streams
-    cfg.enable_stream(RS2_STREAM_COLOR, 640, 480, RS2_FORMAT_BGR8, 30);
-    cfg.enable_stream(RS2_STREAM_DEPTH, 640, 480, RS2_FORMAT_Z16, 30);
+    // Enable infrared stream for SLAM (not depth or color)
+    cfg.enable_stream(RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_Y8, 30);
     
     // Enable gyro and accelerometer
-    cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 200);
-    cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 200);
+    cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 250);
+    cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 400);
 
     // Start the pipeline
+    std::cout << "Starting RealSense pipeline..." << std::endl;
     rs2::pipeline_profile profile = pipe.start(cfg);
 
     // Initialize the VIO system
+    std::cout << "Initializing VIO with calibration from: " << calib_file << std::endl;
     auto vio = rdvio::Odometry(calib_file, config_file);
     
     // Initialize visualization
@@ -53,6 +56,10 @@ int main(int argc, char** argv) {
 
     double timestamp_offset = 0;
     bool first_frame = true;
+    
+    // Tracking stats
+    int frame_count = 0;
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     try {
         while (true) {
@@ -81,36 +88,47 @@ int main(int argc, char** argv) {
                     
                     double time_sec = timestamp - timestamp_offset;
                     
-                    // Apply coordinate system transforms if needed
-                    // RealSense: x right, y down, z forward
-                    // Convert to standard coordinate system if needed by the VIO
+                    // Add motion data to VIO
                     Eigen::Vector3d accel(accel_data.x, accel_data.y, accel_data.z);
                     Eigen::Vector3d gyro(gyro_data.x, gyro_data.y, gyro_data.z);
                     
-                    // Add motion data to VIO
                     vio.addMotion(time_sec, accel, gyro);
                 }
             }
 
-            // Process color frame
-            if (auto color_frame = frames.get_color_frame()) {
-                double timestamp = color_frame.get_timestamp() / 1000.0;
+            // Process infrared frame
+            if (auto ir_frame = frames.get_infrared_frame(1)) { // Get the left infrared frame
+                double timestamp = ir_frame.get_timestamp() / 1000.0;
                 double time_sec = timestamp - timestamp_offset;
                 
-                // Convert RealSense frame to OpenCV Mat
-                const int w = color_frame.get_width();
-                const int h = color_frame.get_height();
-                cv::Mat color(cv::Size(w, h), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+                // Convert RealSense frame to OpenCV Mat - infrared is already grayscale (Y8 format)
+                const int w = ir_frame.get_width();
+                const int h = ir_frame.get_height();
+                cv::Mat ir(cv::Size(w, h), CV_8UC1, (void*)ir_frame.get_data(), cv::Mat::AUTO_STEP);
                 
-                // Convert to grayscale for VIO processing
-                cv::Mat gray;
-                cv::cvtColor(color, gray, cv::COLOR_BGR2GRAY);
+                // Add frame to VIO - no need to convert to grayscale as it's already in grayscale format
+                auto tracking_start = std::chrono::high_resolution_clock::now();
+                vio.addFrame(time_sec, ir);
+                auto tracking_end = std::chrono::high_resolution_clock::now();
+                auto tracking_duration = std::chrono::duration_cast<std::chrono::milliseconds>(tracking_end - tracking_start).count();
                 
-                // Add frame to VIO
-                vio.addFrame(time_sec, gray);
+                frame_count++;
                 
-                // Display the input image
-                viewer.publish_topic("input", color);
+                // Display the input image - convert to BGR for visualization
+                cv::Mat display;
+                cv::cvtColor(ir, display, cv::COLOR_GRAY2BGR);
+                viewer.publish_topic("input", display);
+                
+                // Calculate and show FPS
+                auto current_time = std::chrono::high_resolution_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+                if (elapsed >= 1) {
+                    double fps = static_cast<double>(frame_count) / elapsed;
+                    std::cout << "FPS: " << std::fixed << std::setprecision(1) << fps 
+                              << " | Tracking time: " << tracking_duration << "ms" << std::endl;
+                    frame_count = 0;
+                    start_time = current_time;
+                }
             }
 
             // Display point cloud if VIO is initialized
@@ -120,6 +138,7 @@ int main(int argc, char** argv) {
                 // Display current pose
                 Eigen::Matrix4d T = vio.transform_world_cam();
                 std::cout << "Position: [" 
+                          << std::fixed << std::setprecision(3)
                           << T(0,3) << ", " 
                           << T(1,3) << ", " 
                           << T(2,3) << "]" << std::endl;
@@ -141,6 +160,7 @@ int main(int argc, char** argv) {
     }
 
     // Clean up
+    std::cout << "Shutting down..." << std::endl;
     viewer.exit();
     viewer_thread.join();
     pipe.stop();

@@ -68,11 +68,23 @@ cd build
 ```
 
 #### test with Intel RealSense D455
+First, generate an auto-calibrated configuration using the RealSense's built-in calibration data:
 ```sh
 cd build
-./examples/test_realsense ../configs/realsense_d455_sensor.yaml ../configs/setting.yaml
+./examples/realsense_d455 my_d455_calib.yaml  # Creates calibration file from device
 ```
-Note: You need to have the RealSense D455 camera connected to your computer for this example to work.
+
+Then run the VIO with the generated calibration file:
+```sh
+./examples/test_realsense my_d455_calib.yaml ../configs/setting.yaml
+```
+
+Notes:
+- The D455 camera must be connected to your computer
+- This example uses the infrared camera stream instead of RGB for better performance in SLAM
+- IMU data (gyroscope and accelerometer) is fused with visual tracking for robust odometry
+- The calibration tool automatically extracts intrinsics and extrinsics from the device
+- If calibration looks incorrect, try placing the camera on a stable surface and rerunning the calibration
 
 #### preview
 ![preview](preview.png)  
