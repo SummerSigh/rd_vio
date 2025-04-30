@@ -34,21 +34,6 @@ else()
     message(STATUS "RealSense library not found, skipping test_realsense example")
 endif()
 
-# RealSense D455 Calibration Tool
-if(realsense2_FOUND)
-    add_executable(realsense_d455
-        ${CMAKE_CURRENT_SOURCE_DIR}/realsense_d455.cpp
-    )
-    target_link_libraries(realsense_d455
-        PRIVATE
-            ${PROJECT_NAME}
-            realsense2::realsense2
-            Eigen3::Eigen  # Make sure Eigen is linked
-    )
-    # Set install location to the same directory as other examples
-    install(TARGETS realsense_d455
-        RUNTIME DESTINATION bin
-    )
     message(STATUS "RealSense D455 calibration tool enabled")
 else()
     message(STATUS "RealSense library not found, skipping realsense_d455 calibration tool")
