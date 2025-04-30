@@ -125,43 +125,38 @@ int main(int argc, char** argv) {
                 }
             }
 
-            // Process infrared frame - get the left infrared frame (index 1)
-            if (auto ir_frame_generic = frames.get_infrared_frame(1)) {
-                // Cast to video_frame to access dimensions and data
-                if (auto ir_frame = ir_frame_generic.as<rs2::video_frame>()) {
-                    double timestamp = ir_frame.get_timestamp() / 1000.0;
-                    double time_sec = timestamp - timestamp_offset;
-                    
-                    // Convert RealSense frame to OpenCV Mat - infrared is already grayscale (Y8 format)
-                    const int w = ir_frame.get_width();
-                    const int h = ir_frame.get_height();
-                    cv::Mat ir(cv::Size(w, h), CV_8UC1, (void*)ir_frame.get_data(), cv::Mat::AUTO_STEP);
-                    
-                    // Add frame to VIO - no need to convert to grayscale as it's already in grayscale format
-                    auto tracking_start = std::chrono::high_resolution_clock::now();
-                    vio.addFrame(time_sec, ir);
-                    auto tracking_end = std::chrono::high_resolution_clock::now();
-                    auto tracking_duration = std::chrono::duration_cast<std::chrono::milliseconds>(tracking_end - tracking_start).count();
-                    
-                    frame_count++;
-                    
-                    // Display the input image - convert to BGR for visualization
-                    cv::Mat display;
-                    cv::cvtColor(ir, display, cv::COLOR_GRAY2BGR);
-                    viewer.publish_topic("input", display);
-                    
-                    // Calculate and show FPS
-                    auto current_time = std::chrono::high_resolution_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
-                    if (elapsed >= 1) {
-                        double fps = static_cast<double>(frame_count) / elapsed;
-                        std::cout << "FPS: " << std::fixed << std::setprecision(1) << fps
-                                  << " | Tracking time: " << tracking_duration << "ms" << std::endl;
-                        frame_count = 0;
-                        start_time = current_time;
-                    }
-                } else {
-                     std::cerr << "Warning: Infrared frame received is not a video frame." << std::endl;
+            // Process infrared frame - get the left infrared frame
+            if (auto ir_frame = frames.first(RS2_STREAM_INFRARED, 1)) {
+                double timestamp = ir_frame.get_timestamp() / 1000.0;
+                double time_sec = timestamp - timestamp_offset;
+                
+                // Convert RealSense frame to OpenCV Mat - infrared is already grayscale (Y8 format)
+                const int w = ir_frame.get_width();
+                const int h = ir_frame.get_height();
+                cv::Mat ir(cv::Size(w, h), CV_8UC1, (void*)ir_frame.get_data(), cv::Mat::AUTO_STEP);
+                
+                // Add frame to VIO - no need to convert to grayscale as it's already in grayscale format
+                auto tracking_start = std::chrono::high_resolution_clock::now();
+                vio.addFrame(time_sec, ir);
+                auto tracking_end = std::chrono::high_resolution_clock::now();
+                auto tracking_duration = std::chrono::duration_cast<std::chrono::milliseconds>(tracking_end - tracking_start).count();
+                
+                frame_count++;
+                
+                // Display the input image - convert to BGR for visualization
+                cv::Mat display;
+                cv::cvtColor(ir, display, cv::COLOR_GRAY2BGR);
+                viewer.publish_topic("input", display);
+                
+                // Calculate and show FPS
+                auto current_time = std::chrono::high_resolution_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+                if (elapsed >= 1) {
+                    double fps = static_cast<double>(frame_count) / elapsed;
+                    std::cout << "FPS: " << std::fixed << std::setprecision(1) << fps 
+                              << " | Tracking time: " << tracking_duration << "ms" << std::endl;
+                    frame_count = 0;
+                    start_time = current_time;
                 }
             }
 
