@@ -11,6 +11,19 @@
 #include <rdvio/rdvio.hpp>
 #include "pviz.hpp"
 
+// Function declarations
+void print_intrinsics(const rs2_intrinsics& intrinsics, std::ostream& out);
+void print_motion_intrinsics(const rs2_motion_device_intrinsic& intrinsics, std::ostream& out);
+void print_extrinsics(const rs2_extrinsics& extrinsics, std::ostream& out);
+void generate_rdvio_config(const rs2::pipeline_profile& profile, const std::string& output_file);
+void processCameraCalibration(const rs2::device& device, 
+                             const rs2::pipeline_profile& profile,
+                             const rs2::video_stream_profile& ir_stream_left,
+                             const rs2::video_stream_profile& ir_stream_right,
+                             const rs2::motion_stream_profile& gyro_stream,
+                             const rs2::motion_stream_profile& accel_stream,
+                             const std::string& output_yaml);
+
 // Function to extract and print intrinsics
 void print_intrinsics(const rs2_intrinsics& intrinsics, std::ostream& out) {
     out << std::left << std::setw(14) << "  Width: " << "\t" << intrinsics.width << std::endl
@@ -84,104 +97,167 @@ void generate_rdvio_config(const rs2::pipeline_profile& profile, const std::stri
         // Get extrinsics
         rs2_extrinsics ir_to_imu = ir_stream.get_extrinsics_to(gyro_stream);
 
-    // Write YAML
-    yaml_file << "%YAML:1.0\n";
-    yaml_file << "imu:\n";
-    yaml_file << "  # D455 inertial sensor noise model parameters\n";
-    
-    // Use noise variances from IMU intrinsics
-    yaml_file << "  gyroscope_noise_density: " << std::sqrt(gyro_intrinsics.noise_variances[0]) << "     # [ rad / s / sqrt(Hz) ]\n";
-    yaml_file << "  gyroscope_random_walk: " << std::sqrt(gyro_intrinsics.bias_variances[0]) << "     # [ rad / s^2 / sqrt(Hz) ]\n";
-    yaml_file << "  accelerometer_noise_density: " << std::sqrt(accel_intrinsics.noise_variances[0]) << "  # [ m / s^2 / sqrt(Hz) ]\n";
-    yaml_file << "  accelerometer_random_walk: " << std::sqrt(accel_intrinsics.bias_variances[0]) << "  # [ m / s^3 / sqrt(Hz) ]\n";
-    yaml_file << "  accelerometer_bias: [0.0, 0.0, 0.0] # acc bias prior\n";
-    yaml_file << "  gyroscope_bias: [0.0, 0.0, 0.0]     # gyro bias prior\n";
-    
-    // Calculate rotation quaternion from extrinsics rotation matrix
-    Eigen::Matrix3d rot_matrix;
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            rot_matrix(i, j) = ir_to_imu.rotation[i * 3 + j];
+        // Write YAML
+        yaml_file << "%YAML:1.0\n";
+        yaml_file << "imu:\n";
+        yaml_file << "  # D455 inertial sensor noise model parameters\n";
+        
+        // Use noise variances from IMU intrinsics
+        yaml_file << "  gyroscope_noise_density: " << std::sqrt(gyro_intrinsics.noise_variances[0]) << "     # [ rad / s / sqrt(Hz) ]\n";
+        yaml_file << "  gyroscope_random_walk: " << std::sqrt(gyro_intrinsics.bias_variances[0]) << "     # [ rad / s^2 / sqrt(Hz) ]\n";
+        yaml_file << "  accelerometer_noise_density: " << std::sqrt(accel_intrinsics.noise_variances[0]) << "  # [ m / s^2 / sqrt(Hz) ]\n";
+        yaml_file << "  accelerometer_random_walk: " << std::sqrt(accel_intrinsics.bias_variances[0]) << "  # [ m / s^3 / sqrt(Hz) ]\n";
+        yaml_file << "  accelerometer_bias: [0.0, 0.0, 0.0] # acc bias prior\n";
+        yaml_file << "  gyroscope_bias: [0.0, 0.0, 0.0]     # gyro bias prior\n";
+        
+        // Calculate rotation quaternion from extrinsics rotation matrix
+        Eigen::Matrix3d rot_matrix;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                rot_matrix(i, j) = ir_to_imu.rotation[i * 3 + j];
+            }
         }
-    }
-    Eigen::Quaterniond q(rot_matrix);
-    
-    yaml_file << "  extrinsic:\n";
-    yaml_file << "    q_bi: [ " << q.x() << ", " << q.y() << ", " << q.z() << ", " << q.w() << " ] # x y z w\n";
-    yaml_file << "    p_bi: [ " << ir_to_imu.translation[0] << ", " 
+        Eigen::Quaterniond q(rot_matrix);
+        
+        yaml_file << "  extrinsic:\n";
+        yaml_file << "    q_bi: [ " << q.x() << ", " << q.y() << ", " << q.z() << ", " << q.w() << " ] # x y z w\n";
+        yaml_file << "    p_bi: [ " << ir_to_imu.translation[0] << ", " 
                                << ir_to_imu.translation[1] << ", " 
                                << ir_to_imu.translation[2] << " ] # x y z [m]\n";
-    
-    // Calculate IMU noise covariance matrices based on the motion intrinsics
-    yaml_file << "  noise:\n";
-    yaml_file << "    cov_g: [\n";
-    yaml_file << "      " << gyro_intrinsics.noise_variances[0] << ", 0.0, 0.0,\n";
-    yaml_file << "      0.0, " << gyro_intrinsics.noise_variances[1] << ", 0.0,\n";
-    yaml_file << "      0.0, 0.0, " << gyro_intrinsics.noise_variances[2] << "]\n";
-    
-    yaml_file << "    cov_a: [\n";
-    yaml_file << "      " << accel_intrinsics.noise_variances[0] << ", 0.0, 0.0,\n";
-    yaml_file << "      0.0, " << accel_intrinsics.noise_variances[1] << ", 0.0,\n";
-    yaml_file << "      0.0, 0.0, " << accel_intrinsics.noise_variances[2] << "]\n";
-    
-    yaml_file << "    cov_bg: [\n";
-    yaml_file << "      " << gyro_intrinsics.bias_variances[0] << ", 0.0, 0.0,\n";
-    yaml_file << "      0.0, " << gyro_intrinsics.bias_variances[1] << ", 0.0,\n";
-    yaml_file << "      0.0, 0.0, " << gyro_intrinsics.bias_variances[2] << "]\n";
-    
-    yaml_file << "    cov_ba: [\n";
-    yaml_file << "      " << accel_intrinsics.bias_variances[0] << ", 0.0, 0.0,\n";
-    yaml_file << "      0.0, " << accel_intrinsics.bias_variances[1] << ", 0.0,\n";
-    yaml_file << "      0.0, 0.0, " << accel_intrinsics.bias_variances[2] << "]\n";
-    
-    yaml_file << "\ncam0:\n";
-    yaml_file << "  # D455 infrared camera parameters\n";
-    
-    // Flip the extrinsics for camera to IMU transformation (inverse of IMU to camera)
-    Eigen::Matrix3d rot_matrix_inv = rot_matrix.transpose();
-    Eigen::Vector3d trans_vec;
-    trans_vec << ir_to_imu.translation[0], ir_to_imu.translation[1], ir_to_imu.translation[2];
-    Eigen::Vector3d trans_vec_inv = -rot_matrix_inv * trans_vec;
-    
-    yaml_file << "  T_BS:\n";
-    yaml_file << "    cols: 4\n";
-    yaml_file << "    rows: 4\n";
-    yaml_file << "    data: [";
-    
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            yaml_file << rot_matrix_inv(i, j) << ", ";
+        
+        // Calculate IMU noise covariance matrices based on the motion intrinsics
+        yaml_file << "  noise:\n";
+        yaml_file << "    cov_g: [\n";
+        yaml_file << "      " << gyro_intrinsics.noise_variances[0] << ", 0.0, 0.0,\n";
+        yaml_file << "      0.0, " << gyro_intrinsics.noise_variances[1] << ", 0.0,\n";
+        yaml_file << "      0.0, 0.0, " << gyro_intrinsics.noise_variances[2] << "]\n";
+        
+        yaml_file << "    cov_a: [\n";
+        yaml_file << "      " << accel_intrinsics.noise_variances[0] << ", 0.0, 0.0,\n";
+        yaml_file << "      0.0, " << accel_intrinsics.noise_variances[1] << ", 0.0,\n";
+        yaml_file << "      0.0, 0.0, " << accel_intrinsics.noise_variances[2] << "]\n";
+        
+        yaml_file << "    cov_bg: [\n";
+        yaml_file << "      " << gyro_intrinsics.bias_variances[0] << ", 0.0, 0.0,\n";
+        yaml_file << "      0.0, " << gyro_intrinsics.bias_variances[1] << ", 0.0,\n";
+        yaml_file << "      0.0, 0.0, " << gyro_intrinsics.bias_variances[2] << "]\n";
+        
+        yaml_file << "    cov_ba: [\n";
+        yaml_file << "      " << accel_intrinsics.bias_variances[0] << ", 0.0, 0.0,\n";
+        yaml_file << "      0.0, " << accel_intrinsics.bias_variances[1] << ", 0.0,\n";
+        yaml_file << "      0.0, 0.0, " << accel_intrinsics.bias_variances[2] << "]\n";
+        
+        yaml_file << "\ncam0:\n";
+        yaml_file << "  # D455 infrared camera parameters\n";
+        
+        // Flip the extrinsics for camera to IMU transformation (inverse of IMU to camera)
+        Eigen::Matrix3d rot_matrix_inv = rot_matrix.transpose();
+        Eigen::Vector3d trans_vec;
+        trans_vec << ir_to_imu.translation[0], ir_to_imu.translation[1], ir_to_imu.translation[2];
+        Eigen::Vector3d trans_vec_inv = -rot_matrix_inv * trans_vec;
+        
+        yaml_file << "  T_BS:\n";
+        yaml_file << "    cols: 4\n";
+        yaml_file << "    rows: 4\n";
+        yaml_file << "    data: [";
+        
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                yaml_file << rot_matrix_inv(i, j) << ", ";
+            }
+            yaml_file << trans_vec_inv(i) << ", ";
         }
-        yaml_file << trans_vec_inv(i) << ", ";
-    }
-    yaml_file << "0.0, 0.0, 0.0, 1.0]\n";
-    
-    yaml_file << "  resolution: [" << ir_intrinsics.width << ", " << ir_intrinsics.height << "]\n";
-    yaml_file << "  camera_model: pinhole\n";
-    yaml_file << "  distortion_model: radtan\n";
-    yaml_file << "  intrinsics: [" << ir_intrinsics.fx << ", " << ir_intrinsics.fy << ", " 
-              << ir_intrinsics.ppx << ", " << ir_intrinsics.ppy << "]\n";
-    yaml_file << "  camera_distortion_flag: 1\n";
-    yaml_file << "  distortion: [" << ir_intrinsics.coeffs[0] << ", " << ir_intrinsics.coeffs[1] << ", " 
-              << ir_intrinsics.coeffs[2] << ", " << ir_intrinsics.coeffs[3] << "]\n";
-    yaml_file << "  camera_readout_time: 0.0\n";
-    yaml_file << "  time_offset: 0.0\n";
-    
-    // Camera extrinsics using quaternion representation
-    Eigen::Quaterniond q_bc(rot_matrix_inv);
-    yaml_file << "  extrinsic:\n";
-    yaml_file << "    q_bc: [ " << q_bc.x() << ", " << q_bc.y() << ", " << q_bc.z() << ", " << q_bc.w() << " ]\n";
-    yaml_file << "    p_bc: [ " << trans_vec_inv(0) << ", " << trans_vec_inv(1) << ", " << trans_vec_inv(2) << " ]\n";
-    
-    yaml_file << "  noise: [\n";
-    yaml_file << "    0.5, 0.0,\n";
-    yaml_file << "    0.0, 0.5]\n";
-    
-    yaml_file.close();
-    std::cout << "Successfully wrote RD-VIO configuration to: " << output_file << std::endl;
-    
+        yaml_file << "0.0, 0.0, 0.0, 1.0]\n";
+        
+        yaml_file << "  resolution: [" << ir_intrinsics.width << ", " << ir_intrinsics.height << "]\n";
+        yaml_file << "  camera_model: pinhole\n";
+        yaml_file << "  distortion_model: radtan\n";
+        yaml_file << "  intrinsics: [" << ir_intrinsics.fx << ", " << ir_intrinsics.fy << ", " 
+                  << ir_intrinsics.ppx << ", " << ir_intrinsics.ppy << "]\n";
+        yaml_file << "  camera_distortion_flag: 1\n";
+        yaml_file << "  distortion: [" << ir_intrinsics.coeffs[0] << ", " << ir_intrinsics.coeffs[1] << ", " 
+                  << ir_intrinsics.coeffs[2] << ", " << ir_intrinsics.coeffs[3] << "]\n";
+        yaml_file << "  camera_readout_time: 0.0\n";
+        yaml_file << "  time_offset: 0.0\n";
+        
+        // Camera extrinsics using quaternion representation
+        Eigen::Quaterniond q_bc(rot_matrix_inv);
+        yaml_file << "  extrinsic:\n";
+        yaml_file << "    q_bc: [ " << q_bc.x() << ", " << q_bc.y() << ", " << q_bc.z() << ", " << q_bc.w() << " ]\n";
+        yaml_file << "    p_bc: [ " << trans_vec_inv(0) << ", " << trans_vec_inv(1) << ", " << trans_vec_inv(2) << " ]\n";
+        
+        yaml_file << "  noise: [\n";
+        yaml_file << "    0.5, 0.0,\n";
+        yaml_file << "    0.0, 0.5]\n";
+        
+        yaml_file.close();
+        std::cout << "Successfully wrote RD-VIO configuration to: " << output_file << std::endl;
+        
     } catch (const std::exception& e) {
         std::cerr << "Error generating configuration file: " << e.what() << std::endl;
+    }
+}
+
+// Helper function to process camera calibration
+void processCameraCalibration(const rs2::device& device, 
+                             const rs2::pipeline_profile& profile,
+                             const rs2::video_stream_profile& ir_stream_left,
+                             const rs2::video_stream_profile& ir_stream_right,
+                             const rs2::motion_stream_profile& gyro_stream,
+                             const rs2::motion_stream_profile& accel_stream,
+                             const std::string& output_yaml) {
+    try {
+        // Print device information
+        std::cout << "\n=== Device Information ===" << std::endl;
+        std::cout << "Camera Name: " << device.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
+        std::cout << "Serial Number: " << device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
+        std::cout << "Firmware Version: " << device.get_info(RS2_CAMERA_INFO_FIRMWARE_VERSION) << std::endl;
+        std::cout << "Physical Port: " << device.get_info(RS2_CAMERA_INFO_PHYSICAL_PORT) << std::endl;
+
+        // Print intrinsics
+        std::cout << "\n=== Left Infrared Camera Intrinsics ===" << std::endl;
+        auto ir_left_intrinsics = ir_stream_left.get_intrinsics();
+        print_intrinsics(ir_left_intrinsics, std::cout);
+
+        try {
+            std::cout << "\n=== Right Infrared Camera Intrinsics ===" << std::endl;
+            auto ir_right_intrinsics = ir_stream_right.get_intrinsics();
+            print_intrinsics(ir_right_intrinsics, std::cout);
+        } catch (const std::exception& e) {
+            std::cout << "Right infrared camera not available. Continuing with left camera only." << std::endl;
+        }
+
+        std::cout << "\n=== Gyroscope Intrinsics ===" << std::endl;
+        auto gyro_intrinsics = gyro_stream.get_motion_intrinsics();
+        print_motion_intrinsics(gyro_intrinsics, std::cout);
+
+        std::cout << "\n=== Accelerometer Intrinsics ===" << std::endl;
+        auto accel_intrinsics = accel_stream.get_motion_intrinsics();
+        print_motion_intrinsics(accel_intrinsics, std::cout);
+
+        // Print extrinsics
+        std::cout << "\n=== Extrinsics: Left IR Camera to Gyroscope ===" << std::endl;
+        auto ir_left_to_gyro = ir_stream_left.get_extrinsics_to(gyro_stream);
+        print_extrinsics(ir_left_to_gyro, std::cout);
+
+        std::cout << "\n=== Extrinsics: Left IR Camera to Accelerometer ===" << std::endl;
+        auto ir_left_to_accel = ir_stream_left.get_extrinsics_to(accel_stream);
+        print_extrinsics(ir_left_to_accel, std::cout);
+
+        try {
+            std::cout << "\n=== Extrinsics: Left IR Camera to Right IR Camera ===" << std::endl;
+            auto ir_left_to_ir_right = ir_stream_left.get_extrinsics_to(ir_stream_right);
+            print_extrinsics(ir_left_to_ir_right, std::cout);
+        } catch (const std::exception& e) {
+            std::cout << "Right infrared camera extrinsics not available." << std::endl;
+        }
+
+        // Generate RD-VIO configuration file
+        std::cout << "\nGenerating RD-VIO configuration file..." << std::endl;
+        generate_rdvio_config(profile, output_yaml);
+    } catch (const std::exception& e) {
+        std::cerr << "\nError during calibration: " << e.what() << std::endl;
+        throw; // Rethrow to be caught by the main try-catch
     }
 }
 
@@ -283,6 +359,18 @@ int main(int argc, char** argv) {
             auto ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>(); // Right IR camera
             auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
             auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
+            
+            // Process calibration
+            processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
+                                    gyro_stream, accel_stream, output_yaml);
+            
+            // Stop the pipeline
+            pipe.stop();
+            
+            std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
+            std::cout << "./examples/test_realsense " << output_yaml << " ../configs/setting.yaml" << std::endl;
+            
+            return 0; // Success
         }
         catch (const rs2::error& e) {
             std::cerr << "\nRealSense error: " << e.what() << std::endl;
@@ -321,15 +409,22 @@ int main(int argc, char** argv) {
                 
                 // Get device streams
                 auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
-                auto ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2, RS2_FORMAT_ANY, 0).as<rs2::video_stream_profile>(); // Right IR camera (if available)
+                // Get right stream if available, otherwise we'll just use the left for calibration
+                rs2::video_stream_profile ir_stream_right(nullptr);
+                try {
+                    ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>();
+                } catch(...) {
+                    std::cout << "  - Right IR stream not available, using left only" << std::endl;
+                }
+                
                 auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
                 auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
                 
-                // Continue with calibration using these streams
+                // Process calibration
                 processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                                        gyro_stream, accel_stream, output_yaml);
+                                       gyro_stream, accel_stream, output_yaml);
                 
-                // Stop the pipeline when done
+                // Stop the pipeline
                 pipe.stop();
                 
                 std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
@@ -345,89 +440,6 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
-        
-        // If we're here, the first attempt succeeded
-        // Continue with calibration using obtained streams
-        processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                               gyro_stream, accel_stream, output_yaml);
-        
-        // Stop the pipeline when done
-        pipe.stop();
-        
-        std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
-        std::cout << "./examples/test_realsense " << output_yaml << " ../configs/setting.yaml" << std::endl;
-        
-        return 0; // Success
-    }
-    
-    // Helper function to process camera calibration
-    void processCameraCalibration(const rs2::device& device, const rs2::pipeline_profile& profile,
-                                 const rs2::video_stream_profile& ir_stream_left,
-                                 const rs2::video_stream_profile& ir_stream_right,
-                                 const rs2::motion_stream_profile& gyro_stream,
-                                 const rs2::motion_stream_profile& accel_stream,
-                                 const std::string& output_yaml) {
-        try {
-            // Print device information
-            std::cout << "\n=== Device Information ===" << std::endl;
-            std::cout << "Camera Name: " << device.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
-            std::cout << "Serial Number: " << device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
-            std::cout << "Firmware Version: " << device.get_info(RS2_CAMERA_INFO_FIRMWARE_VERSION) << std::endl;
-            std::cout << "Physical Port: " << device.get_info(RS2_CAMERA_INFO_PHYSICAL_PORT) << std::endl;
-
-            // Print intrinsics
-            std::cout << "\n=== Left Infrared Camera Intrinsics ===" << std::endl;
-            auto ir_left_intrinsics = ir_stream_left.get_intrinsics();
-            print_intrinsics(ir_left_intrinsics, std::cout);
-
-            try {
-                std::cout << "\n=== Right Infrared Camera Intrinsics ===" << std::endl;
-                auto ir_right_intrinsics = ir_stream_right.get_intrinsics();
-                print_intrinsics(ir_right_intrinsics, std::cout);
-            } catch (const std::exception& e) {
-                std::cout << "Right infrared camera not available. Continuing with left camera only." << std::endl;
-            }
-
-            std::cout << "\n=== Gyroscope Intrinsics ===" << std::endl;
-            auto gyro_intrinsics = gyro_stream.get_motion_intrinsics();
-            print_motion_intrinsics(gyro_intrinsics, std::cout);
-
-            std::cout << "\n=== Accelerometer Intrinsics ===" << std::endl;
-            auto accel_intrinsics = accel_stream.get_motion_intrinsics();
-            print_motion_intrinsics(accel_intrinsics, std::cout);
-
-            // Print extrinsics
-            std::cout << "\n=== Extrinsics: Left IR Camera to Gyroscope ===" << std::endl;
-            auto ir_left_to_gyro = ir_stream_left.get_extrinsics_to(gyro_stream);
-            print_extrinsics(ir_left_to_gyro, std::cout);
-
-            std::cout << "\n=== Extrinsics: Left IR Camera to Accelerometer ===" << std::endl;
-            auto ir_left_to_accel = ir_stream_left.get_extrinsics_to(accel_stream);
-            print_extrinsics(ir_left_to_accel, std::cout);
-
-            try {
-                std::cout << "\n=== Extrinsics: Left IR Camera to Right IR Camera ===" << std::endl;
-                auto ir_left_to_ir_right = ir_stream_left.get_extrinsics_to(ir_stream_right);
-                print_extrinsics(ir_left_to_ir_right, std::cout);
-            } catch (const std::exception& e) {
-                std::cout << "Right infrared camera extrinsics not available." << std::endl;
-            }
-
-            // Generate RD-VIO configuration file
-            std::cout << "\nGenerating RD-VIO configuration file..." << std::endl;
-            generate_rdvio_config(profile, output_yaml);
-        } catch (const std::exception& e) {
-            std::cerr << "\nError during calibration: " << e.what() << std::endl;
-            throw; // Rethrow to be caught by the main try-catch
-        }
-    }
-        // Stop the pipeline
-        pipe.stop();
-
-        std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
-        std::cout << "./examples/test_realsense " << output_yaml << " ../configs/setting.yaml" << std::endl;
-
-        return 0;
     }
     catch (const rs2::error &e) {
         std::cerr << "RealSense error: " << e.what() << std::endl;
@@ -437,4 +449,6 @@ int main(int argc, char** argv) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
+    
+    return 0;
 }

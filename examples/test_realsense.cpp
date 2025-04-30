@@ -125,8 +125,8 @@ int main(int argc, char** argv) {
                 }
             }
 
-            // Process infrared frame
-            if (auto ir_frame = frames.get_infrared_frame(1)) { // Get the left infrared frame
+            // Process infrared frame - get the left infrared frame
+            if (auto ir_frame = frames.first(RS2_STREAM_INFRARED, 1)) {
                 double timestamp = ir_frame.get_timestamp() / 1000.0;
                 double time_sec = timestamp - timestamp_offset;
                 
