@@ -219,11 +219,16 @@ void processCameraCalibration(const rs2::device& device,
         auto ir_left_intrinsics = ir_stream_left.get_intrinsics();
         print_intrinsics(ir_left_intrinsics, std::cout);
 
-        try {
-            std::cout << "\n=== Right Infrared Camera Intrinsics ===" << std::endl;
-            auto ir_right_intrinsics = ir_stream_right.get_intrinsics();
-            print_intrinsics(ir_right_intrinsics, std::cout);
-        } catch (const std::exception& e) {
+        // Check if right camera is different from left camera (could be the same if right wasn't available)
+        if (&ir_stream_left != &ir_stream_right) {
+            try {
+                std::cout << "\n=== Right Infrared Camera Intrinsics ===" << std::endl;
+                auto ir_right_intrinsics = ir_stream_right.get_intrinsics();
+                print_intrinsics(ir_right_intrinsics, std::cout);
+            } catch (const std::exception& e) {
+                std::cout << "Right infrared camera not available. Continuing with left camera only." << std::endl;
+            }
+        } else {
             std::cout << "Right infrared camera not available. Continuing with left camera only." << std::endl;
         }
 
@@ -244,12 +249,17 @@ void processCameraCalibration(const rs2::device& device,
         auto ir_left_to_accel = ir_stream_left.get_extrinsics_to(accel_stream);
         print_extrinsics(ir_left_to_accel, std::cout);
 
-        try {
-            std::cout << "\n=== Extrinsics: Left IR Camera to Right IR Camera ===" << std::endl;
-            auto ir_left_to_ir_right = ir_stream_left.get_extrinsics_to(ir_stream_right);
-            print_extrinsics(ir_left_to_ir_right, std::cout);
-        } catch (const std::exception& e) {
-            std::cout << "Right infrared camera extrinsics not available." << std::endl;
+        // Only attempt to get extrinsics if we have a real right camera
+        if (&ir_stream_left != &ir_stream_right) {
+            try {
+                std::cout << "\n=== Extrinsics: Left IR Camera to Right IR Camera ===" << std::endl;
+                auto ir_left_to_ir_right = ir_stream_left.get_extrinsics_to(ir_stream_right);
+                print_extrinsics(ir_left_to_ir_right, std::cout);
+            } catch (const std::exception& e) {
+                std::cout << "Right infrared camera extrinsics not available." << std::endl;
+            }
+        } else {
+            std::cout << "\nRight infrared camera not available. Skipping stereo extrinsics." << std::endl;
         }
 
         // Generate RD-VIO configuration file
@@ -356,13 +366,29 @@ int main(int argc, char** argv) {
             
             // Get device streams
             auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
-            auto ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>(); // Right IR camera
+            
+            // Get right stream if available, otherwise we'll just use the left for calibration
+            rs2::video_stream_profile ir_stream_right;
+            bool right_available = false;
+            try {
+                ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>();
+                right_available = true;
+            } catch(...) {
+                std::cout << "  - Right IR stream not available, using left only" << std::endl;
+            }
+            
             auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
             auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
             
-            // Process calibration
-            processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                                    gyro_stream, accel_stream, output_yaml);
+            // Process calibration - only use right camera if available
+            if (right_available) {
+                processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
+                                      gyro_stream, accel_stream, output_yaml);
+            } else {
+                // Use left camera for right camera if right is not available
+                processCameraCalibration(device, profile, ir_stream_left, ir_stream_left, 
+                                      gyro_stream, accel_stream, output_yaml);
+            }
             
             // Stop the pipeline
             pipe.stop();
