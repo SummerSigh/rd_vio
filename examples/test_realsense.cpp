@@ -1,5 +1,6 @@
 #include <chrono>
 #include <thread>
+#include <iomanip>
 #include <librealsense2/rs.hpp>
 #include <librealsense2/rs_advanced_mode.hpp>
 
@@ -126,7 +127,8 @@ int main(int argc, char** argv) {
             }
 
             // Process infrared frame - get the left infrared frame
-            if (auto ir_frame = frames.first(RS2_STREAM_INFRARED, 1)) {
+            rs2::video_frame ir_frame = frames.get_infrared_frame(1);
+            if (ir_frame) {
                 double timestamp = ir_frame.get_timestamp() / 1000.0;
                 double time_sec = timestamp - timestamp_offset;
                 
