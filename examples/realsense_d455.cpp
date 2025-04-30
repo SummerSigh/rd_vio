@@ -261,94 +261,147 @@ void processCameraCalibration(const rs2::device& device,
     }
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char * argv[]) try
+{
+    // Get output file path from command line arguments
+    std::string output_yaml = "realsense_d455_calibration.yaml";
+    if (argc > 1) {
+        output_yaml = argv[1];
+    }
+
+    // Create RealSense context
+    rs2::context ctx;
+    rs2::device_list devices = ctx.query_devices();
+    if (devices.size() == 0) {
+        std::cerr << "No RealSense devices found!" << std::endl;
+        std::cerr << "Please make sure your camera is connected and recognized by the system." << std::endl;
+        std::cerr << "You can check with 'rs-enumerate-devices' command if it's installed." << std::endl;
+        return 1;
+    }
+
+    std::cout << "Found " << devices.size() << " RealSense device(s)" << std::endl;
+    rs2::device device = devices[0];
+    std::cout << "Using device: " << device.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
+    std::cout << "Serial Number: " << device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
+    
+    // Check firmware version
+    std::string fw_version = device.get_info(RS2_CAMERA_INFO_FIRMWARE_VERSION);
+    std::cout << "Firmware Version: " << fw_version << std::endl;
+    
+    // Firmware should be newer than 5.13.0.0 for good IMU data
+    std::istringstream version_stream(fw_version);
+    std::string major_version;
+    std::getline(version_stream, major_version, '.');
+    
     try {
-        // Get output file path from command line arguments
-        std::string output_yaml = "realsense_d455_calibration.yaml";
-        if (argc > 1) {
-            output_yaml = argv[1];
+        int major = std::stoi(major_version);
+        if (major < 5) {
+            std::cout << "\nWARNING: Your camera firmware might be outdated." << std::endl;
+            std::cout << "For optimal results, consider updating to firmware 5.13.0.0 or newer." << std::endl;
+            std::cout << "Visit: https://dev.intelrealsense.com/docs/firmware-updates" << std::endl;
         }
+    } catch (const std::exception& e) {
+        // Ignore parsing errors
+    }
 
-        // Create RealSense context
-        rs2::context ctx;
-        rs2::device_list devices = ctx.query_devices();
-        if (devices.size() == 0) {
-            std::cerr << "No RealSense devices found!" << std::endl;
-            std::cerr << "Please make sure your camera is connected and recognized by the system." << std::endl;
-            std::cerr << "You can check with 'rs-enumerate-devices' command if it's installed." << std::endl;
-            return 1;
-        }
+    // Configure pipeline
+    rs2::pipeline pipe;
+    rs2::config cfg;
 
-        std::cout << "Found " << devices.size() << " RealSense device(s)" << std::endl;
-        rs2::device device = devices[0];
-        std::cout << "Using device: " << device.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
-        std::cout << "Serial Number: " << device.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
+    // Print available sensors on the device
+    std::cout << "\nAvailable sensors on this device:" << std::endl;
+    for (auto& sensor : device.query_sensors()) {
+        std::cout << "  - " << sensor.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
         
-        // Check firmware version
-        std::string fw_version = device.get_info(RS2_CAMERA_INFO_FIRMWARE_VERSION);
-        std::cout << "Firmware Version: " << fw_version << std::endl;
-        
-        // Firmware should be newer than 5.13.0.0 for good IMU data
-        std::istringstream version_stream(fw_version);
-        std::string major_version;
-        std::getline(version_stream, major_version, '.');
-        
-        try {
-            int major = std::stoi(major_version);
-            if (major < 5) {
-                std::cout << "\nWARNING: Your camera firmware might be outdated." << std::endl;
-                std::cout << "For optimal results, consider updating to firmware 5.13.0.0 or newer." << std::endl;
-                std::cout << "Visit: https://dev.intelrealsense.com/docs/firmware-updates" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            // Ignore parsing errors
-        }
-
-        // Configure pipeline
-        rs2::pipeline pipe;
-        rs2::config cfg;
-
-        // Print available sensors on the device
-        std::cout << "\nAvailable sensors on this device:" << std::endl;
-        for (auto& sensor : device.query_sensors()) {
-            std::cout << "  - " << sensor.get_info(RS2_CAMERA_INFO_NAME) << std::endl;
-            
-            // Print supported streams for each sensor
-            std::cout << "    Supported streams:" << std::endl;
-            for (auto& profile : sensor.get_stream_profiles()) {
-                auto video_profile = profile.as<rs2::video_stream_profile>();
-                if (video_profile) {
-                    std::cout << "      - " << rs2_stream_to_string(profile.stream_type()) << " " 
-                              << profile.stream_index() << " (" 
-                              << video_profile.width() << "x" << video_profile.height() << " @ " 
-                              << profile.fps() << " fps, format: " 
-                              << rs2_format_to_string(profile.format()) << ")" << std::endl;
-                } else if (auto motion_profile = profile.as<rs2::motion_stream_profile>()) {
-                    std::cout << "      - " << rs2_stream_to_string(profile.stream_type()) 
-                              << " @ " << profile.fps() << " fps" << std::endl;
-                }
+        // Print supported streams for each sensor
+        std::cout << "    Supported streams:" << std::endl;
+        for (auto& profile : sensor.get_stream_profiles()) {
+            auto video_profile = profile.as<rs2::video_stream_profile>();
+            if (video_profile) {
+                std::cout << "      - " << rs2_stream_to_string(profile.stream_type()) << " " 
+                          << profile.stream_index() << " (" 
+                          << video_profile.width() << "x" << video_profile.height() << " @ " 
+                          << profile.fps() << " fps, format: " 
+                          << rs2_format_to_string(profile.format()) << ")" << std::endl;
+            } else if (auto motion_profile = profile.as<rs2::motion_stream_profile>()) {
+                std::cout << "      - " << rs2_stream_to_string(profile.stream_type()) 
+                          << " @ " << profile.fps() << " fps" << std::endl;
             }
         }
+    }
+    
+    std::cout << "\nConfiguring streams:" << std::endl;
+    
+    // Try a more flexible approach with stream configuration
+    try {
+        // Enable streams needed for calibration - try with default configurations first
+        std::cout << "  - Enabling Left IR Stream..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_INFRARED, 1);  // Left infrared camera
         
-        std::cout << "\nConfiguring streams:" << std::endl;
+        std::cout << "  - Enabling Right IR Stream..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_INFRARED, 2);  // Right infrared camera
         
-        // Try a more flexible approach with stream configuration
+        std::cout << "  - Enabling Accelerometer..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_ACCEL);
+        
+        std::cout << "  - Enabling Gyroscope..." << std::endl;
+        cfg.enable_stream(RS2_STREAM_GYRO);
+        
+        // Start pipeline with configuration
+        std::cout << "\nStarting pipeline to collect calibration information..." << std::endl;
+        rs2::pipeline_profile profile = pipe.start(cfg);
+        
+        // Wait a moment for streams to settle
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
+        // Get device streams
+        auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
+        auto ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>(); // Right IR camera
+        auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
+        auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
+        
+        // Process calibration
+        processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
+                               gyro_stream, accel_stream, output_yaml);
+        
+        // Stop the pipeline
+        pipe.stop();
+        
+        std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
+        std::cout << "./examples/test_realsense " << output_yaml << " ../configs/setting.yaml" << std::endl;
+        
+        return 0; // Success
+    }
+    catch (const rs2::error& e) {
+        std::cerr << "\nRealSense error: " << e.what() << std::endl;
+        std::cerr << "Error occurred at " << e.get_failed_function() << "(" << e.get_failed_args() << ")" << std::endl;
+        
+        // Try fallback configuration if your device doesn't support default configuration
+        std::cout << "\nTrying fallback configuration..." << std::endl;
         try {
-            // Enable streams needed for calibration - try with default configurations first
-            std::cout << "  - Enabling Left IR Stream..." << std::endl;
-            cfg.enable_stream(RS2_STREAM_INFRARED, 1);  // Left infrared camera
+            // Clear configuration
+            cfg = rs2::config();
             
-            std::cout << "  - Enabling Right IR Stream..." << std::endl;
-            cfg.enable_stream(RS2_STREAM_INFRARED, 2);  // Right infrared camera
+            // Try alternative configuration with specific parameters known to work with D455
+            std::cout << "  - Enabling Left IR Stream (640x480 @ 30fps)..." << std::endl;
+            cfg.enable_stream(RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_Y8, 30);
             
-            std::cout << "  - Enabling Accelerometer..." << std::endl;
-            cfg.enable_stream(RS2_STREAM_ACCEL);
+            if (device.get_info(RS2_CAMERA_INFO_NAME) == std::string("Intel RealSense D415")) {
+                std::cout << "  - D415 detected, skipping right IR stream..." << std::endl;
+            } else {
+                std::cout << "  - Enabling Right IR Stream (640x480 @ 30fps)..." << std::endl;
+                cfg.enable_stream(RS2_STREAM_INFRARED, 2, 640, 480, RS2_FORMAT_Y8, 30);
+            }
             
-            std::cout << "  - Enabling Gyroscope..." << std::endl;
-            cfg.enable_stream(RS2_STREAM_GYRO);
+            // Try different IMU rates
+            std::cout << "  - Enabling Accelerometer (200Hz)..." << std::endl;
+            cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 200);
             
-            // Start pipeline with configuration
-            std::cout << "\nStarting pipeline to collect calibration information..." << std::endl;
+            std::cout << "  - Enabling Gyroscope (200Hz)..." << std::endl;
+            cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 200);
+            
+            std::cout << "\nStarting pipeline with fallback configuration..." << std::endl;
+            pipe.stop(); // Make sure to stop any previous pipeline
             rs2::pipeline_profile profile = pipe.start(cfg);
             
             // Wait a moment for streams to settle
@@ -356,13 +409,20 @@ int main(int argc, char** argv) {
             
             // Get device streams
             auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
-            auto ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>(); // Right IR camera
+            // Get right stream if available, otherwise we'll just use the left for calibration
+            rs2::video_stream_profile ir_stream_right(nullptr);
+            try {
+                ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>();
+            } catch(...) {
+                std::cout << "  - Right IR stream not available, using left only" << std::endl;
+            }
+            
             auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
             auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
             
             // Process calibration
             processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                                    gyro_stream, accel_stream, output_yaml);
+                                   gyro_stream, accel_stream, output_yaml);
             
             // Stop the pipeline
             pipe.stop();
@@ -372,73 +432,12 @@ int main(int argc, char** argv) {
             
             return 0; // Success
         }
-        catch (const rs2::error& e) {
-            std::cerr << "\nRealSense error: " << e.what() << std::endl;
-            std::cerr << "Error occurred at " << e.get_failed_function() << "(" << e.get_failed_args() << ")" << std::endl;
-            
-            // Try fallback configuration if your device doesn't support default configuration
-            std::cout << "\nTrying fallback configuration..." << std::endl;
-            try {
-                // Clear configuration
-                cfg = rs2::config();
-                
-                // Try alternative configuration with specific parameters known to work with D455
-                std::cout << "  - Enabling Left IR Stream (640x480 @ 30fps)..." << std::endl;
-                cfg.enable_stream(RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_Y8, 30);
-                
-                if (device.get_info(RS2_CAMERA_INFO_NAME) == std::string("Intel RealSense D415")) {
-                    std::cout << "  - D415 detected, skipping right IR stream..." << std::endl;
-                } else {
-                    std::cout << "  - Enabling Right IR Stream (640x480 @ 30fps)..." << std::endl;
-                    cfg.enable_stream(RS2_STREAM_INFRARED, 2, 640, 480, RS2_FORMAT_Y8, 30);
-                }
-                
-                // Try different IMU rates
-                std::cout << "  - Enabling Accelerometer (200Hz)..." << std::endl;
-                cfg.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, 200);
-                
-                std::cout << "  - Enabling Gyroscope (200Hz)..." << std::endl;
-                cfg.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, 200);
-                
-                std::cout << "\nStarting pipeline with fallback configuration..." << std::endl;
-                pipe.stop(); // Make sure to stop any previous pipeline
-                rs2::pipeline_profile profile = pipe.start(cfg);
-                
-                // Wait a moment for streams to settle
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                
-                // Get device streams
-                auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
-                // Get right stream if available, otherwise we'll just use the left for calibration
-                rs2::video_stream_profile ir_stream_right(nullptr);
-                try {
-                    ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>();
-                } catch(...) {
-                    std::cout << "  - Right IR stream not available, using left only" << std::endl;
-                }
-                
-                auto gyro_stream = profile.get_stream(RS2_STREAM_GYRO).as<rs2::motion_stream_profile>();
-                auto accel_stream = profile.get_stream(RS2_STREAM_ACCEL).as<rs2::motion_stream_profile>();
-                
-                // Process calibration
-                processCameraCalibration(device, profile, ir_stream_left, ir_stream_right, 
-                                       gyro_stream, accel_stream, output_yaml);
-                
-                // Stop the pipeline
-                pipe.stop();
-                
-                std::cout << "\nAutomatic calibration complete. You can now run VIO with:" << std::endl;
-                std::cout << "./examples/test_realsense " << output_yaml << " ../configs/setting.yaml" << std::endl;
-                
-                return 0; // Success
-            }
-            catch (const rs2::error& e2) {
-                std::cerr << "\nFallback configuration also failed: " << e2.what() << std::endl;
-                std::cerr << "Error details: " << e2.get_failed_function() << "(" << e2.get_failed_args() << ")" << std::endl;
-                std::cerr << "\nPlease check that your camera is properly connected and has firmware version 5.13.0.0 or newer." << std::endl;
-                std::cerr << "You can also try disconnecting and reconnecting the camera." << std::endl;
-                return 1;
-            }
+        catch (const rs2::error& e2) {
+            std::cerr << "\nFallback configuration also failed: " << e2.what() << std::endl;
+            std::cerr << "Error details: " << e2.get_failed_function() << "(" << e2.get_failed_args() << ")" << std::endl;
+            std::cerr << "\nPlease check that your camera is properly connected and has firmware version 5.13.0.0 or newer." << std::endl;
+            std::cerr << "You can also try disconnecting and reconnecting the camera." << std::endl;
+            return 1;
         }
     }
     catch (const rs2::error &e) {
