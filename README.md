@@ -39,6 +39,16 @@ Make sure you have installed:
 - yaml-cpp
 - pangolin
 
+For the RealSense example, you also need:
+- librealsense2 (for Intel RealSense cameras)
+
+To install librealsense2:
+```sh
+# For Ubuntu/Debian systems
+sudo apt-get install librealsense2-dev librealsense2-dkms
+```
+See the [librealsense installation guide](https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md) for more detailed instructions.
+
 Then run the following commands:
 ```sh
 # clone the repo
@@ -54,8 +64,21 @@ make -j4
 #### test on EuRoC
 ```sh
 cd build
-./examples/test_euroc ../configs/euroc_sensor.yaml ../configs/settings.yaml $/path/to/euroc/mav0
+./examples/test_euroc ../configs/euroc_sensor.yaml ../configs/setting.yaml $/path/to/euroc/mav0
 ```
+
+#### test with Intel RealSense D455
+```sh
+cd build
+./examples/test_realsense ../configs/realsense_d455_sensor.yaml ../configs/setting.yaml
+```
+
+#### test with Intel RealSense D455 (New Example)
+```sh
+cd build
+./examples/realsense_d455 ../configs/realsense_d455_sensor.yaml ../configs/setting.yaml
+```
+Note: You need to have the RealSense D455 camera connected to your computer for this example to work.
 
 #### preview
 ![preview](preview.png)  
