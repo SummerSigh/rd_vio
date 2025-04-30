@@ -410,9 +410,11 @@ int main(int argc, char** argv) {
                 // Get device streams
                 auto ir_stream_left = profile.get_stream(RS2_STREAM_INFRARED, 1).as<rs2::video_stream_profile>(); // Left IR camera
                 // Get right stream if available, otherwise we'll just use the left for calibration
-                rs2::video_stream_profile ir_stream_right(nullptr);
+                rs2::video_stream_profile ir_stream_right;
+                bool right_available = false;
                 try {
                     ir_stream_right = profile.get_stream(RS2_STREAM_INFRARED, 2).as<rs2::video_stream_profile>();
+                    right_available = true;
                 } catch(...) {
                     std::cout << "  - Right IR stream not available, using left only" << std::endl;
                 }
