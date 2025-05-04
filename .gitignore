@@ -5,3 +5,7 @@ MH_01_easy.zip
 MH_05_difficult.zip
 MIO09_short_1_updown.zip
 /mav0
+/rd_vio/bin
+/rd_vio/lib
+rd_vio/pyvenv.cfg
+rd_vio/lib64
