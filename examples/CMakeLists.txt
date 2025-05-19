@@ -23,13 +23,8 @@ target_link_libraries(test_advio
 
 # ─────────────────── RealSense demos ─────────────
 if(realsense2_FOUND)
-    add_executable(test_realsense     ${CMAKE_CURRENT_SOURCE_DIR}/test_realsense.cpp)
     add_executable(realsense_d455     ${CMAKE_CURRENT_SOURCE_DIR}/realsense_d455.cpp)
-    add_executable(show_left_cam      ${CMAKE_CURRENT_SOURCE_DIR}/showleftcam.cpp)
-
-    target_link_libraries(test_realsense  PRIVATE ${PROJECT_NAME} realsense2::realsense2)
     target_link_libraries(realsense_d455  PRIVATE ${PROJECT_NAME} realsense2::realsense2)
-    target_link_libraries(show_left_cam   PRIVATE ${PROJECT_NAME} realsense2::realsense2)
 
     message(STATUS "RealSense support enabled")
 else()

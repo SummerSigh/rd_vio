@@ -1,193 +1,201 @@
-// realsense_d455.cpp
-// Build with:
-//     g++ realsense_d455.cpp -std=c++17 -lrealsense2 -o realsense_d455
-//
-// Tested with librealsense 2.55 and Intel RealSense D455 (works the same
-// for any RealSense that has Infrared-1 + ACCEL + GYRO streams).
-
-#include <librealsense2/rs.hpp>
-#include <fstream>
+#include <chrono>
 #include <iomanip>
 #include <iostream>
-#include <cmath>
+#include <memory>
+#include <mutex>
+#include <thread>
 
-using namespace rs2;
+#include <librealsense2/rs.hpp>
+#include <opencv2/opencv.hpp>
 
-// ─────────────────────────────── helpers ───────────────────────────────────
-static void rotation_to_quat(const float R[9], double q[4])
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
+#include <rdvio/rdvio.hpp>
+#include "slime.cpp"
+
+struct ImgSample {
+    double  ts_sec {0.0};
+    cv::Mat img;
+};
+
+struct ImuSamplePair {
+    double          ts_sec {0.0};
+    Eigen::Vector3d accel  {0,0,0};
+    Eigen::Vector3d gyro   {0,0,0};
+};
+
+std::shared_ptr<ImgSample>      g_latest_img;
+std::shared_ptr<ImuSamplePair>  g_latest_imu;
+std::mutex                      g_img_mtx, g_imu_mtx;
+
+template<typename T>
+inline void swap_into(std::shared_ptr<T>& slot, std::shared_ptr<T>&& val,
+                      std::mutex& mtx)
 {
-    double t = R[0] + R[4] + R[8];
-    if (t > 0.0) {
-        double s = std::sqrt(t + 1.0) * 2.0;
-        q[3] = 0.25 * s;
-        q[0] = (R[7] - R[5]) / s;
-        q[1] = (R[2] - R[6]) / s;
-        q[2] = (R[3] - R[1]) / s;
-    } else if (R[0] > R[4] && R[0] > R[8]) {
-        double s = std::sqrt(1.0 + R[0] - R[4] - R[8]) * 2.0;
-        q[3] = (R[7] - R[5]) / s;
-        q[0] = 0.25 * s;
-        q[1] = (R[1] + R[3]) / s;
-        q[2] = (R[2] + R[6]) / s;
-    } else if (R[4] > R[8]) {
-        double s = std::sqrt(1.0 + R[4] - R[0] - R[8]) * 2.0;
-        q[3] = (R[2] - R[6]) / s;
-        q[0] = (R[1] + R[3]) / s;
-        q[1] = 0.25 * s;
-        q[2] = (R[5] + R[7]) / s;
-    } else {
-        double s = std::sqrt(1.0 + R[8] - R[0] - R[4]) * 2.0;
-        q[3] = (R[3] - R[1]) / s;
-        q[0] = (R[2] + R[6]) / s;
-        q[1] = (R[5] + R[7]) / s;
-        q[2] = 0.25 * s;
-    }
+    std::lock_guard<std::mutex> lock(mtx);
+    slot.swap(val);
 }
 
-// Convert librealsense’s (σ²) arrays → averaged σ (std-dev) per axis
-static void get_noise_params(const rs2_motion_device_intrinsic &mi,
-                             double &noise_density,
-                             double &random_walk)
+template<typename T>
+inline std::shared_ptr<T> take_latest(std::shared_ptr<T>& slot,
+                                      std::mutex& mtx)
 {
-    auto mean_sigma = [](const float v[3]) -> double {
-        return (std::sqrt(v[0]) + std::sqrt(v[1]) + std::sqrt(v[2])) / 3.0;
-    };
-    noise_density = mean_sigma(mi.noise_variances);
-    random_walk   = mean_sigma(mi.bias_variances);
+    std::lock_guard<std::mutex> lock(mtx);
+    std::shared_ptr<T> out;
+    slot.swap(out);
+    return out;
 }
 
-// Write EuroC-style YAML -----------------------------------------------------
-static void write_yaml(const std::string &path,
-                       const rs2_intrinsics  &cam_in,
-                       const rs2_extrinsics  &ex_cam_from_imu,
-                       double cam_rate_hz,
-                       double gyro_noise,  double gyro_rw,
-                       double accel_noise, double accel_rw,
-                       double imu_rate_hz)
+int main(int argc, char** argv)
 {
-    double q_bc[4];
-    rotation_to_quat(ex_cam_from_imu.rotation, q_bc);
-
-    std::ofstream out(path);
-    if (!out) throw std::runtime_error("cannot open output file");
-
-    out << std::fixed << std::setprecision(8);
-
-    // ── cam0 ───────────────────────────────────────────────────────────
-    out << "cam0:\n"
-        << "  T_BS:\n"
-        << "    cols: 4\n"
-        << "    rows: 4\n"
-        << "    data: ["
-        << ex_cam_from_imu.rotation[0] << ", " << ex_cam_from_imu.rotation[1] << ", "
-        << ex_cam_from_imu.rotation[2] << ", " << ex_cam_from_imu.translation[0] << ", "
-        << ex_cam_from_imu.rotation[3] << ", " << ex_cam_from_imu.rotation[4] << ", "
-        << ex_cam_from_imu.rotation[5] << ", " << ex_cam_from_imu.translation[1] << ", "
-        << ex_cam_from_imu.rotation[6] << ", " << ex_cam_from_imu.rotation[7] << ", "
-        << ex_cam_from_imu.rotation[8] << ", " << ex_cam_from_imu.translation[2] << ", "
-        << "0.0, 0.0, 0.0, 1.0]\n"
-        << "  resolution: [" << cam_in.width << ", " << cam_in.height << "]\n"
-        << "  camera_model: pinhole\n"
-        << "  distortion_model: radtan\n"
-        << "  intrinsics: [" << cam_in.fx << ", " << cam_in.fy << ", "
-        << cam_in.ppx << ", " << cam_in.ppy << "]\n"
-        << "  camera_distortion_flag: 1\n"
-        << "  distortion: [" << cam_in.coeffs[0] << ", " << cam_in.coeffs[1] << ", "
-                              << cam_in.coeffs[2] << ", " << cam_in.coeffs[3] << "]\n"
-        << "  camera_readout_time: 0.0\n"
-        << "  time_offset: 0.0\n"
-        << "  extrinsic:\n"
-        << "    q_bc: [" << q_bc[0] << ", " << q_bc[1] << ", "
-                           << q_bc[2] << ", " << q_bc[3] << "]\n"
-        << "    p_bc: [" << ex_cam_from_imu.translation[0] << ", "
-                           << ex_cam_from_imu.translation[1] << ", "
-                           << ex_cam_from_imu.translation[2] << "]\n"
-        << "  rate_hz: " << cam_rate_hz << "\n\n";
-
-    // ── imu ────────────────────────────────────────────────────────────
-    out << "imu:\n"
-        << "  gyroscope_noise_density:     " << gyro_noise  << "\n"
-        << "  gyroscope_random_walk:       " << gyro_rw     << "\n"
-        << "  accelerometer_noise_density: " << accel_noise << "\n"
-        << "  accelerometer_random_walk:   " << accel_rw    << "\n"
-        << "  accelerometer_bias: [0.0, 0.0, 0.0]\n"
-        << "  gyroscope_bias:     [0.0, 0.0, 0.0]\n"
-        << "  extrinsic:\n"
-        << "    q_bi: [0.0, 0.0, 0.0, 1.0]\n"
-        << "    p_bi: [0.0, 0.0, 0.0]\n"
-        << "  rate_hz: " << imu_rate_hz << "\n";
-
-    std::cout << "Wrote rs_sensor.yaml\n";
-}
-
-// ──────────────────────────────── main ─────────────────────────────────────
-int main()
-try
-{
-    context ctx;
-    auto devs = ctx.query_devices();
-    if (devs.size() == 0) {
-        std::cerr << "No RealSense device detected\n";
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0]
+                  << " <calib_file.yml> <config_file.yaml>\n";
         return EXIT_FAILURE;
     }
-    device dev = devs.front();
+    const std::string calib_file  = argv[1];
+    const std::string config_file = argv[2];
 
-    video_stream_profile cam_profile;  // Infrared-1
-    stream_profile      accel_profile; // ACCEL placeholder
-    stream_profile      gyro_profile;  // GYRO  placeholder
+    // RealSense initialisation
+    rs2::pipeline pipe;
+    rs2::config   cfg;
+    cfg.enable_stream(RS2_STREAM_INFRARED, 1, 1280, 720, RS2_FORMAT_Y8, 30);
+    cfg.enable_stream(RS2_STREAM_GYRO ,    RS2_FORMAT_MOTION_XYZ32F, 200);
+    cfg.enable_stream(RS2_STREAM_ACCEL,    RS2_FORMAT_MOTION_XYZ32F,  63);
 
-    // --- find stream profiles ------------------------------------------------
-    for (auto &&sensor : dev.query_sensors())
-        for (auto &&sp : sensor.get_stream_profiles()) {
-            if (!cam_profile  &&
-                sp.stream_type() == RS2_STREAM_INFRARED &&
-                sp.stream_index() == 1)
-                cam_profile = sp.as<video_stream_profile>();
+    rs2::pipeline_profile profile = pipe.start(cfg);
 
-            if (!accel_profile && sp.stream_type() == RS2_STREAM_ACCEL)
-                accel_profile = sp;   // keep generic
+    // disable IR emitter and set the internal queue to 2 frames
+    for (auto& s : profile.get_device().query_sensors()) {
+        if (s.supports(RS2_OPTION_FRAMES_QUEUE_SIZE))
+            s.set_option(RS2_OPTION_FRAMES_QUEUE_SIZE, 2);
+        if (s.supports(RS2_OPTION_EMITTER_ENABLED))
+            s.set_option(RS2_OPTION_EMITTER_ENABLED, 0.f);
+        if (s.supports(RS2_OPTION_LASER_POWER))
+            s.set_option(RS2_OPTION_LASER_POWER, 0.f);
+    }
 
-            if (!gyro_profile  && sp.stream_type() == RS2_STREAM_GYRO)
-                gyro_profile  = sp;   // keep generic
+    // VIO initialisation
+    rdvio::Odometry vio(calib_file, config_file);
+
+    // SlimeVR server stuff
+    while (!slimeDiscoverServer(0)) {
+        std::cout << "[Slime] searching for server …\n";
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    std::cout << "[Slime] connected!\n";
+    std::thread([]{
+        for (;;) { slimeSendHeartbeat(); std::this_thread::sleep_for(
+                       std::chrono::seconds(1)); }
+    }).detach();
+    
+    // RealSense outputs in ms and RD-VIO needs seconds for some reason
+    constexpr double TS_SCALE = 1e-3;
+
+
+    std::thread cap_thread([&]{
+        rs2::frameset fs;
+        ImuSamplePair imu_pair; //RD-VIO expects the data in pairs so we can only run the IMU data at the rate of the slowest compenent. I should figure out a way to cahnge that
+        bool have_accel = false, have_gyro = false;
+
+        while (true) {
+            if (!pipe.poll_for_frames(&fs)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            //pull IR image from realsense stream
+            if (auto ir = fs.get_infrared_frame(1)) {
+                auto sample   = std::make_shared<ImgSample>();
+                sample->ts_sec = ir.get_timestamp() * TS_SCALE;
+                sample->img    = cv::Mat(cv::Size(1280,720), CV_8UC1,
+                                         (void*)ir.get_data(),
+                                         cv::Mat::AUTO_STEP)
+                                     .clone();          // own copy
+                swap_into(g_latest_img, std::move(sample), g_img_mtx);
+            }
+
+            //pull IMU from realsense stream
+            for (auto&& f : fs) {
+                if (!f.is<rs2::motion_frame>()) continue;
+                const double ts_sec = f.get_timestamp() * TS_SCALE;
+                rs2_stream stype    = f.get_profile().stream_type();
+                rs2_vector v        = f.as<rs2::motion_frame>().get_motion_data();
+
+                imu_pair.ts_sec = ts_sec;
+                if (stype == RS2_STREAM_ACCEL) {
+                    imu_pair.accel = {v.x, v.y, v.z};
+                    have_accel = true;
+                } else if (stype == RS2_STREAM_GYRO) {
+                    imu_pair.gyro  = {v.x, v.y, v.z};
+                    have_gyro = true;
+                }
+
+                if (have_accel && have_gyro) {
+                    swap_into(g_latest_imu,
+                              std::make_shared<ImuSamplePair>(imu_pair),
+                              g_imu_mtx);
+                    have_accel = have_gyro = false;
+                }
+            }
         }
+    });
 
-    if (!cam_profile)  { std::cerr << "Infrared-1 not found\n";  return EXIT_FAILURE; }
-    if (!accel_profile){ std::cerr << "ACCEL stream not found\n"; return EXIT_FAILURE; }
-    if (!gyro_profile) { std::cerr << "GYRO stream not found\n";  return EXIT_FAILURE; }
+    //We calibrate the IMU bias here so you have to leave your realsense down and let it calibrate bias. Im not sure if this helps but i did this when trying to debug and just left it here. 
+    std::thread proc_thread([&]{
+        constexpr int   BIAS_SAMPLES = 500;
+        bool            bias_done = false;
+        int             cnt_a = 0, cnt_g = 0;
+        Eigen::Vector3d sum_a(0,0,0), sum_g(0,0,0);
+        Eigen::Vector3d accel_bias(0,0,0), gyro_bias(0,0,0);
 
-    // --- camera intrinsics / extrinsics -------------------------------------
-    rs2_intrinsics cam_in = cam_profile.get_intrinsics();
-    rs2_extrinsics ex_cam_from_imu =
-        accel_profile.as<motion_stream_profile>().get_extrinsics_to(cam_profile);
+        for (;;) { //no idea you could do this in C++
+            auto img = take_latest(g_latest_img, g_img_mtx);
+            auto imu = take_latest(g_latest_imu, g_imu_mtx);
 
-    // --- IMU noise parameters ------------------------------------------------
-    rs2_motion_device_intrinsic accel_intr =
-        accel_profile.as<motion_stream_profile>().get_motion_intrinsics();
-    rs2_motion_device_intrinsic gyro_intr  =
-        gyro_profile .as<motion_stream_profile>().get_motion_intrinsics();
+            if (!imu) { std::this_thread::sleep_for(
+                            std::chrono::milliseconds(1)); continue; }
 
-    double accel_noise, accel_rw;
-    double gyro_noise,  gyro_rw;
-    get_noise_params(accel_intr, accel_noise, accel_rw);
-    get_noise_params(gyro_intr,  gyro_noise,  gyro_rw);
+            if (!bias_done) {
+                sum_a += imu->accel; ++cnt_a;
+                sum_g += imu->gyro ; ++cnt_g;
+                if (cnt_a >= BIAS_SAMPLES && cnt_g >= BIAS_SAMPLES) {
+                    accel_bias = sum_a / cnt_a;
+                    gyro_bias  = sum_g / cnt_g;
+                    bias_done  = true;
+                    std::cout << "\n[IMU] Bias calibration finished\n"
+                              << "     Gyro  bias:  " << gyro_bias.transpose()  << "\n"
+                              << "     Accel bias: " << accel_bias.transpose() << "\n";
+                }
+                continue;
+            }
 
-    // --- write YAML ----------------------------------------------------------
-    write_yaml("rs_sensor.yaml",
-               cam_in, ex_cam_from_imu, cam_profile.fps(),
-               gyro_noise, gyro_rw,
-               accel_noise, accel_rw,
-               accel_profile.fps());          // single rate used by RD-VIO
+            vio.addMotion(imu->ts_sec,
+                          imu->accel - accel_bias,
+                          imu->gyro  - gyro_bias);
 
-    return EXIT_SUCCESS;
-}
-catch (const rs2::error &e)
-{
-    std::cerr << "RealSense error: " << e.what()
-              << " (" << e.get_failed_function() << ":" << e.get_failed_args() << ")\n";
-    return EXIT_FAILURE;
-}
-catch (const std::exception &e)
-{
-    std::cerr << e.what() << '\n';
-    return EXIT_FAILURE;
+            if (img)
+                vio.addFrame(img->ts_sec, img->img);
+
+            if (vio.state() == 1) {
+                Eigen::Matrix4d T_wc = vio.transform_world_cam();
+                Eigen::Quaterniond q (T_wc.block<3,3>(0,0));
+
+                slimeSendRotationQuat(static_cast<float>( q.x()),
+                                      static_cast<float>( q.z()),
+                                      static_cast<float>(-q.y()),
+                                      static_cast<float>( q.w()));
+
+                std::cout << std::fixed << std::setprecision(3)
+                          << "\rQuat: [" << q.x() << ", " << q.z()
+                          << ", " << -q.y() << ", " << q.w() << "]   "
+                          << std::flush;
+            }
+        }
+    });
+
+    cap_thread.join();
+    proc_thread.join();
+    return 0;
 }
