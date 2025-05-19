@@ -150,7 +150,7 @@ int main(int argc, char** argv)
         Eigen::Vector3d sum_a(0,0,0), sum_g(0,0,0);
         Eigen::Vector3d accel_bias(0,0,0), gyro_bias(0,0,0);
 
-        for (;;) { //no idea you could do this in C++
+        while(true){ //no idea you could do this in C++
             auto img = take_latest(g_latest_img, g_img_mtx);
             auto imu = take_latest(g_latest_imu, g_imu_mtx);
 
