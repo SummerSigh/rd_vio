@@ -5,6 +5,7 @@
 #include <rdvio/estimation/ceres/reprojection_factor.h>
 #include <rdvio/estimation/ceres/rotation_factor.h>
 #include <rdvio/estimation/solver.h>
+// #include <rdvio/estimation/g2o_solver.h>  // Disabled temporarily due to linking issues
 #include <rdvio/estimation/state.h>
 #include <rdvio/map/frame.h>
 
@@ -48,6 +49,8 @@ Solver::~Solver() {
 void Solver::init(Config *config) { SolverDetails::config() = config; }
 
 std::unique_ptr<Solver> Solver::create() {
+    // For now, return the Ceres solver to avoid g2o linking issues
+    // TODO: Fix g2o fmt compatibility and re-enable
     return std::unique_ptr<Solver>(new Solver());
 }
 

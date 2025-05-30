@@ -121,7 +121,7 @@ void SlidingWindowTracker::localize_newframe() {
         }
     }
 
-    solver->solve();
+    solver->solve(true);  // Enable verbose output for debugging
 }
 
 bool SlidingWindowTracker::manage_keyframe() {
@@ -299,7 +299,7 @@ void SlidingWindowTracker::refine_window() {
         }
     }
 
-    solver->solve();
+    solver->solve(true);  // Enable verbose output for debugging
 
     for (size_t k = 0; k < map->track_num(); ++k) {
         Track *track = map->get_track(k);
@@ -403,7 +403,7 @@ void SlidingWindowTracker::refine_subwindow() {
             }
         }
 
-        solver->solve();
+        solver->solve(true);  // Enable verbose output for debugging
         frame->tag(FT_FIX_POSE) = false;
         frame->tag(FT_FIX_MOTION) = false;
     } else {
@@ -437,7 +437,7 @@ void SlidingWindowTracker::refine_subwindow() {
                 }
             }
         }
-        solver->solve();
+        solver->solve(true);  // Enable verbose output for debugging
         frame->tag(FT_FIX_POSE) = false;
         frame->tag(FT_FIX_MOTION) = false;
     }

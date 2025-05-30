@@ -11,6 +11,15 @@ target_link_libraries(test_euroc
         $<$<BOOL:${realsense2_FOUND}>:realsense2::realsense2>   # <-- add this
 )
 
+# ───────────────────── EuRoC Simple (no SlimeVR) ─────────────────────
+add_executable(test_euroc_simple
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_euroc_simple.cpp
+)
+target_link_libraries(test_euroc_simple
+    PRIVATE
+        ${PROJECT_NAME}
+)
+
 # ───────────────────── ADVIO ─────────────────────
 add_executable(test_advio
     ${CMAKE_CURRENT_SOURCE_DIR}/test_advio.cpp

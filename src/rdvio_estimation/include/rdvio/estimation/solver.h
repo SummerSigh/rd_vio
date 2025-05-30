@@ -14,6 +14,8 @@ class Track;
 
 class Solver {
     struct SolverDetails;
+    
+  protected:
     Solver();
 
   public:

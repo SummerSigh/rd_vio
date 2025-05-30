@@ -29,14 +29,19 @@ endif()
 find_package(Threads REQUIRED)
 find_package(OpenCV 4 REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(Ceres REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(SuiteSparse)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FMT REQUIRED fmt)
 
 ## multi thread
 option(THREADING "Enable multi-threading" ON)
 if(THREADING)
     add_definitions(-DUSE_MULTI_THREADING)
 endif()
+
+## third party
+add_subdirectory(3rd)
 
 ## source
 add_subdirectory(src)

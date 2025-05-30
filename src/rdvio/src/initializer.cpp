@@ -125,7 +125,7 @@ std::unique_ptr<SlidingWindowTracker> Initializer::initialize() {
                 frame_i, frame_j, frame_j->preintegration));
         }
     }
-    solver->solve();
+    solver->solve(true);  // Enable verbose output for debugging
 
     for (size_t i = 0; i < map->frame_num(); ++i) {
         map->get_frame(i)->tag(FT_KEYFRAME) = true;
@@ -300,7 +300,7 @@ bool Initializer::init_sfm() {
                     Solver::create_reprojection_prior_factor(frame_j, track));
             }
         }
-        solver->solve();
+        solver->solve(true);  // Enable verbose output for debugging
     }
 
     // [2.3] triangulate more points
@@ -351,7 +351,8 @@ bool Initializer::init_sfm() {
             solver->add_factor(frame->reprojection_error_factors[j].get());
         }
     }
-    if (!solver->solve()) {
+    if (!solver->solve(true)) {  // Enable verbose output for debugging
+        std::cout << "SfM bundle adjustment failed" << std::endl;
         return false;
     }
 
